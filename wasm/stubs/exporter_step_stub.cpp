@@ -31,9 +31,13 @@
 #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
 #include <exporters/step/exporter_step.h>
 
-// Complete types for the unique_ptr members destroyed in ~EXPORTER_STEP (their
-// headers still exist in the tree/sysroot; only the OCC *link* is gone).
-#include <exporters/step/step_pcb_model.h>
+// Complete types for the unique_ptr members destroyed in ~EXPORTER_STEP. The
+// bridge never constructs m_pcbModel, so an empty completion avoids pulling
+// the OCC-only STEP_PCB_MODEL header into the PCB editor.
+class STEP_PCB_MODEL
+{
+};
+
 #include <filename_resolver.h>
 
 namespace

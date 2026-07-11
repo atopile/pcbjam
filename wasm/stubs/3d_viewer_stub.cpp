@@ -8,6 +8,7 @@
 #include <3d_viewer/eda_3d_viewer_settings.h>
 #include <3d_viewer/toolbars_3d.h>
 #include <base_units.h>
+#include <settings/settings_manager.h>
 
 // EDA_3D_VIEWER_FRAME stub implementations
 // The 3D viewer is not available in WASM builds
@@ -91,6 +92,11 @@ void EDA_3D_VIEWER_FRAME::ExportImage( EDA_3D_VIEWER_EXPORT_FORMAT aFormat, cons
     (void)aFormat;
     (void)aSize;
     // No-op: 3D viewer not available
+}
+
+APP_SETTINGS_BASE* EDA_3D_VIEWER_FRAME::config() const
+{
+    return GetAppSettings<EDA_3D_VIEWER_SETTINGS>( "3d_viewer" );
 }
 
 void EDA_3D_VIEWER_FRAME::setupUIConditions()

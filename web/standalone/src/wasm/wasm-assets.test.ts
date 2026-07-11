@@ -44,13 +44,13 @@ describe("resolveWasmBase", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("resolves the tool's BUNDLE folder from the manifest (pcbnew → kicad_editor)", async () => {
+  it("resolves the tool's BUNDLE folder from the manifest (pcbnew → pcbnew)", async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       json: async () => ({
         schema: 2,
         tag: "2.7.7",
-        tools: { kicad_editor: "2.7.5", gerbview: "2.7.1" },
+        tools: { pcbnew: "2.7.5", gerbview: "2.7.1" },
       }),
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -59,7 +59,7 @@ describe("resolveWasmBase", () => {
       WASM_MANIFEST_FILE: "manifest-2.7.7.json",
     });
     expect(await resolveWasmBase(PCBNEW)).toBe(
-      "https://cdn.pcbjam.com/wasm/kicad_editor/2.7.5",
+      "https://cdn.pcbjam.com/wasm/pcbnew/2.7.5",
     );
     // Manifest is fetched uncached, and only ONCE across calls (in-memory cached).
     expect(await resolveWasmBase("gerbview" as Tool)).toBe(
@@ -82,7 +82,7 @@ describe("resolveWasmBase", () => {
       WASM_MANIFEST_FILE: "manifest-2.7.7.json",
     });
     await expect(resolveWasmBase(PCBNEW)).rejects.toThrow(
-      /no WASM version for "kicad_editor"/,
+      /no WASM version for "pcbnew"/,
     );
   });
 
@@ -105,9 +105,9 @@ describe("resolveWasmMeta", () => {
         json: async () => ({
           schema: 2,
           tag: "2.7.7",
-          tools: { kicad_editor: "2.7.5" },
+          tools: { pcbnew: "2.7.5" },
           sizes: {
-            kicad_editor: { wasm: 350_000_000, wasmStored: 90_000_000, totalStored: 95_000_000 },
+            pcbnew: { wasm: 350_000_000, wasmStored: 90_000_000, totalStored: 95_000_000 },
           },
         }),
       })),
@@ -117,8 +117,8 @@ describe("resolveWasmMeta", () => {
       WASM_MANIFEST_FILE: "manifest-2.7.7.json",
     });
     expect(await resolveWasmMeta(PCBNEW)).toEqual({
-      base: "https://cdn.pcbjam.com/wasm/kicad_editor/2.7.5",
-      bundle: "kicad_editor",
+      base: "https://cdn.pcbjam.com/wasm/pcbnew/2.7.5",
+      bundle: "pcbnew",
       ver: "2.7.5",
       sizes: { wasm: 350_000_000, wasmStored: 90_000_000, totalStored: 95_000_000 },
     });
@@ -129,7 +129,7 @@ describe("resolveWasmMeta", () => {
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ schema: 1, tag: "2.7.7", tools: { kicad_editor: "2.7.5" } }),
+        json: async () => ({ schema: 1, tag: "2.7.7", tools: { pcbnew: "2.7.5" } }),
       })),
     );
     const { resolveWasmMeta } = await loadModule({
@@ -170,13 +170,13 @@ describe("download-completion marker", () => {
       WASM_ROOT: "/wasm",
       WASM_MANIFEST_FILE: null,
     });
-    expect(isWasmDownloaded("kicad_editor", "2.7.5")).toBe(false);
-    markWasmDownloaded("kicad_editor", "2.7.5");
-    expect(isWasmDownloaded("kicad_editor", "2.7.5")).toBe(true);
+    expect(isWasmDownloaded("pcbnew", "2.7.5")).toBe(false);
+    markWasmDownloaded("pcbnew", "2.7.5");
+    expect(isWasmDownloaded("pcbnew", "2.7.5")).toBe(true);
     // content-addressed: a new release is honestly "not downloaded yet"
-    expect(isWasmDownloaded("kicad_editor", "2.8.0")).toBe(false);
+    expect(isWasmDownloaded("pcbnew", "2.8.0")).toBe(false);
     // flat/override layouts (ver null) never read warm and never write
-    expect(isWasmDownloaded("kicad_editor", null)).toBe(false);
+    expect(isWasmDownloaded("pcbnew", null)).toBe(false);
     markWasmDownloaded("gerbview", null);
     expect(isWasmDownloaded("gerbview", "any")).toBe(false);
   });
@@ -185,25 +185,25 @@ describe("download-completion marker", () => {
     const map = stubLocalStorage();
     const { hasAnyWasmDownload, isWasmDownloaded, markWasmDownloaded } =
       await loadModule({ WASM_ROOT: "/wasm", WASM_MANIFEST_FILE: null });
-    expect(hasAnyWasmDownload("kicad_editor")).toBe(false);
-    markWasmDownloaded("kicad_editor", "2.7.5");
+    expect(hasAnyWasmDownload("pcbnew")).toBe(false);
+    markWasmDownloaded("pcbnew", "2.7.5");
     markWasmDownloaded("gerbview", "2.7.5");
     // Before re-downloading, the OLD marker makes the consent an "update".
-    expect(hasAnyWasmDownload("kicad_editor")).toBe(true);
-    markWasmDownloaded("kicad_editor", "2.8.0");
-    expect(isWasmDownloaded("kicad_editor", "2.8.0")).toBe(true);
-    expect(isWasmDownloaded("kicad_editor", "2.7.5")).toBe(false); // superseded, dropped
+    expect(hasAnyWasmDownload("pcbnew")).toBe(true);
+    markWasmDownloaded("pcbnew", "2.8.0");
+    expect(isWasmDownloaded("pcbnew", "2.8.0")).toBe(true);
+    expect(isWasmDownloaded("pcbnew", "2.7.5")).toBe(false); // superseded, dropped
     expect(isWasmDownloaded("gerbview", "2.7.5")).toBe(true); // other bundles untouched
-    expect([...map.keys()].filter((k) => k.includes("kicad_editor"))).toHaveLength(1);
+    expect([...map.keys()].filter((k) => k.includes("pcbnew"))).toHaveLength(1);
   });
 
   it("treats blocked/absent storage as cold and never throws", async () => {
     // node env: no localStorage global at all
     const { hasAnyWasmDownload, isWasmDownloaded, markWasmDownloaded } =
       await loadModule({ WASM_ROOT: "/wasm", WASM_MANIFEST_FILE: null });
-    expect(isWasmDownloaded("kicad_editor", "2.7.5")).toBe(false);
-    expect(hasAnyWasmDownload("kicad_editor")).toBe(false);
-    expect(() => markWasmDownloaded("kicad_editor", "2.7.5")).not.toThrow();
+    expect(isWasmDownloaded("pcbnew", "2.7.5")).toBe(false);
+    expect(hasAnyWasmDownload("pcbnew")).toBe(false);
+    expect(() => markWasmDownloaded("pcbnew", "2.7.5")).not.toThrow();
   });
 
   it("auto-download preference round-trips and defaults off", async () => {
@@ -231,16 +231,16 @@ describe("fetchWasmStoredSize", () => {
       WASM_ROOT: "/wasm",
       WASM_MANIFEST_FILE: null,
     });
-    expect(await fetchWasmStoredSize("https://cdn/x/1", "kicad_editor")).toBe(12345678);
-    expect(fetchMock).toHaveBeenCalledWith("https://cdn/x/1/kicad_editor.wasm", {
+    expect(await fetchWasmStoredSize("https://cdn/x/1", "pcbnew")).toBe(12345678);
+    expect(fetchMock).toHaveBeenCalledWith("https://cdn/x/1/pcbnew.wasm", {
       method: "HEAD",
     });
 
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 405 })));
-    expect(await fetchWasmStoredSize("https://cdn/x/1", "kicad_editor")).toBeNull();
+    expect(await fetchWasmStoredSize("https://cdn/x/1", "pcbnew")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, headers: { get: () => null } })));
-    expect(await fetchWasmStoredSize("https://cdn/x/1", "kicad_editor")).toBeNull();
+    expect(await fetchWasmStoredSize("https://cdn/x/1", "pcbnew")).toBeNull();
     vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("net"))));
-    expect(await fetchWasmStoredSize("https://cdn/x/1", "kicad_editor")).toBeNull();
+    expect(await fetchWasmStoredSize("https://cdn/x/1", "pcbnew")).toBeNull();
   });
 });
