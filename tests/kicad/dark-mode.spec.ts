@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { compareToReference, hideCursor, PCBNEW_REFERENCE, PCBNEW_HEADER_REGION } from './utils/screenshot-compare';
+import { compareToReference, hideCursor, PCBNEW_HEADER_REGION } from './utils/screenshot-compare';
 import { waitForEditorReady } from '../e2e/utils/element-tracker';
 
 /**
@@ -11,23 +11,33 @@ import { waitForEditorReady } from '../e2e/utils/element-tracker';
  * browser preference, a dark-mode browser got dark-variant (light-stroke)
  * icons and dark widget colours painted onto the light UI.
  *
- * This test loads pcbnew with the browser forced to dark mode and asserts the
- * header (menubar + top toolbar, where the icons live) renders identically to
- * the light-mode reference used by pcbnew.spec.ts.
+ * This test boots the current pcbnew build once in light mode and once with the
+ * browser forced to dark mode, then compares their headers. Using a same-run
+ * light reference keeps deliberate menu/toolbar pruning independent from this
+ * theme regression gate.
  */
 
-// colorScheme emulation alone is lost in Firefox on cross-origin-isolated
-// pages (the COOP/COEP headers serve.json adds for SharedArrayBuffer put the
-// page in an isolated process the override doesn't reach), so also set the
-// browser-wide dark-theme pref for the firefox project. launchOptions forces a
-// new worker, so this must be top-level rather than inside the describe.
-test.use({
-    colorScheme: 'dark',
-    launchOptions: { firefoxUserPrefs: { 'ui.systemUsesDarkTheme': 1 } },
-});
-
 test.describe('PCBnew dark-mode browser', () => {
-    test('toolbar icons render the light theme under a dark-mode browser', async ({ page }) => {
+    test('toolbar icons render the light theme under a dark-mode browser', async ({ browser }) => {
+        const lightContext = await browser.newContext({
+            colorScheme: 'light',
+            viewport: { width: 1280, height: 720 },
+        });
+        const lightPage = await lightContext.newPage();
+        await lightPage.goto('/kicad/pcbnew.html');
+        await waitForEditorReady(lightPage);
+        await hideCursor(lightPage);
+        await lightPage.screenshot({
+            path: 'test-results/pcbnew-light-mode-current.png',
+            scale: 'css',
+        });
+        await lightContext.close();
+
+        const darkContext = await browser.newContext({
+            colorScheme: 'dark',
+            viewport: { width: 1280, height: 720 },
+        });
+        const page = await darkContext.newPage();
         await page.goto('/kicad/pcbnew.html');
 
         // Sanity-check the browser really reports dark mode to the app.
@@ -43,11 +53,17 @@ test.describe('PCBnew dark-mode browser', () => {
             scale: 'css'
         });
 
-        const reference = await compareToReference(page, cssScreenshot, PCBNEW_REFERENCE, PCBNEW_HEADER_REGION);
+        const reference = await compareToReference(
+            page,
+            cssScreenshot,
+            'test-results/pcbnew-light-mode-current.png',
+            PCBNEW_HEADER_REGION,
+        );
 
         expect(reference.actualWidth).toBe(reference.referenceWidth);
         expect(reference.actualHeight).toBe(reference.referenceHeight);
         expect(reference.diffRatio, 'header diff ratio vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxDiffRatio);
         expect(reference.meanChannelDiff, 'header mean channel diff vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxMeanChannelDiff);
+        await darkContext.close();
     });
 });

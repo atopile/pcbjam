@@ -135,6 +135,29 @@ const BIG_MODULE_SPECS = [
 // CDP CPU throttling (Chromium-only) and pcbnew needs V8. Excluded from the
 // firefox/chromium projects so they don't double-run there.
 const PERF_SPECS = ["**/*-perf.spec.ts"];
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === "1";
+
+// Product CI covers only the PCB editor shipped to the web IDE. Keep the
+// historical multi-tool specs available for fork development, but do not let
+// removed KiCad applications, menus, viewers, importers, or exporters gate the
+// PCB-only artifact.
+const PCB_ONLY_FIREFOX_SPECS = [
+  "**/presence-locks-pcbnew.spec.ts",
+  "**/presence-pcbnew.spec.ts",
+];
+const PCB_ONLY_CHROMIUM_SPECS = [
+  "**/appearance.spec.ts",
+  "**/contextmenu-scrollbar-pcbnew.spec.ts",
+  "**/dark-mode.spec.ts",
+  "**/items-bridge.spec.ts",
+  "**/pcbnew-collab.spec.ts",
+  "**/pcbnew-move.spec.ts",
+  "**/pcbnew.spec.ts",
+  "**/roundtrip.spec.ts",
+  "**/save-hook.spec.ts",
+  "**/ysync-repros-pcbnew.spec.ts",
+  "**/ysync-two-tab.spec.ts",
+];
 
 const appsDir = "apps";
 
@@ -150,10 +173,10 @@ export default defineConfig({
   // screenshots go through stableShot for the offline gate, not asserted inline), so a failure
   // is a real failure rather than flake to mask with a retry.
   retries: 0,
-  // Run parallel workers on CI too (Playwright default ≈ 50% of cores), same as
-  // local — the serial CI run was the dominant wall-clock cost. Cap (e.g. '50%'
-  // or a fixed count) if contention OOMs/flakes.
-  workers: undefined,
+  // A PCB editor instance carries a large WASM heap. Keep CI concurrency stable
+  // across GitHub and larger self-hosted runners instead of letting Playwright
+  // scale to dozens of simultaneous instances and exhaust the browser budget.
+  workers: process.env.CI ? 8 : undefined,
   reporter: "html",
   timeout: 180000, // KiCad WASM needs more time to load (3 minutes)
 
@@ -171,6 +194,7 @@ export default defineConfig({
     {
       // Firefox is the default for headless testing (works on ARM Mac)
       name: "firefox",
+      testMatch: PCB_ONLY ? PCB_ONLY_FIREFOX_SPECS : undefined,
       // Perf specs always run on the dedicated 'perf' project, never here. On CI
       // every merged-module (kicad_editor) spec moves to chromium-ci (see
       // BIG_MODULE_SPECS).
@@ -218,6 +242,9 @@ export default defineConfig({
       // Chromium issues #1416283, #338414704 (SwiftShader WebGL bug).
       // Run via: npm run test:kicad:headed
       name: "chromium",
+      testMatch: PCB_ONLY
+        ? [...PCB_ONLY_FIREFOX_SPECS, ...PCB_ONLY_CHROMIUM_SPECS]
+        : undefined,
       testIgnore: PERF_SPECS,
       use: {
         channel: "chrome",
@@ -231,7 +258,7 @@ export default defineConfig({
       // --enable-unsafe-swiftshader: newer Chromium refuses software WebGL in
       // headless without it.
       name: "chromium-ci",
-      testMatch: BIG_MODULE_SPECS,
+      testMatch: PCB_ONLY ? PCB_ONLY_CHROMIUM_SPECS : BIG_MODULE_SPECS,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 720 },

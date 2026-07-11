@@ -2,6 +2,8 @@ import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { sexprDiff } from "../../web/standalone/src/wasm/collab/sexpr-diff";
 
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === "1";
+
 /**
  * Round-trip integration tests (feature 0004; v2 items wire since ysync 0008
  * Stage D): for each collab-capable, file-bearing tool prove the Y.Doc
@@ -322,6 +324,7 @@ test.describe("round trip: file → yjs → file", () => {
   test.describe.configure({ timeout: 420000 });
 
   test("pl_editor preserves items through a yjs round trip", async ({ context, testLogger }) => {
+    test.skip(PCB_ONLY, "PCB-only product build");
     const { orig, regen } = await roundTrip(context, PL);
     const diff = sexprDiff(orig, regen, { ignoreTokens: PL.ignoreTokens });
     expect(
@@ -332,6 +335,7 @@ test.describe("round trip: file → yjs → file", () => {
   });
 
   test("eeschema preserves items through a yjs round trip", async ({ context, testLogger }) => {
+    test.skip(PCB_ONLY, "PCB-only product build");
     const { orig, regen } = await roundTrip(context, SCH);
     const diff = sexprDiff(orig, regen, { ignoreTokens: SCH.ignoreTokens });
     expect(

@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === "1";
+
 /**
  * V2 "items" wire two-tab e2e — the PRODUCTION collab stack, end to end
  * (ysync-review miss 11): bindKicadCollab + moduleItemsBridge over the kdoc_*
@@ -242,6 +244,7 @@ test.beforeAll(() => {
 // ── pl_editor: the green baseline (harness validation + adopt coverage) ──────
 
 test.describe("v2 items wire — pl_editor two tabs (green baseline)", () => {
+  test.skip(PCB_ONLY, "PCB-only product build");
   test.describe.configure({ timeout: 420000 });
 
   test("fresh room: A file-seeds, edits flow A→B and B→A, item drift silent", async ({
@@ -337,10 +340,10 @@ test.describe("v2 items wire — pl_editor two tabs (green baseline)", () => {
 // ysync-repros-{pcbnew,eeschema}.spec.ts: if that control is red, flip these
 // to test.fixme (the harness can't drive the tool's emit at all).
 
-for (const [cfg, label] of [
+for (const [cfg, label] of ([
   [PCB, "pcbnew"],
   [SCH, "eeschema"],
-] as const) {
+] as const).filter(([, label]) => !PCB_ONLY || label === "pcbnew")) {
   test.describe(`v2 items wire — ${label} fresh room (bug 01 repro)`, () => {
     test.describe.configure({ timeout: 420000 });
 
@@ -408,6 +411,7 @@ for (const [cfg, label] of [
 // and asserts the room ends on one clean sequence either way.
 
 test.describe("v2 items wire — concurrent seed (bug 06 repro)", () => {
+  test.skip(PCB_ONLY, "PCB-only product build");
   test.describe.configure({ timeout: 420000 });
 
   test("both tabs seed a fresh room at once: the room converges on one clean sequence", async ({

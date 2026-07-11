@@ -238,7 +238,9 @@ const PCB: ToolCfg = {
 
 // ── The per-tool suite ───────────────────────────────────────────────────────
 
-for (const cfg of [PL, SCH, PCB]) {
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === "1";
+
+for (const cfg of [PL, SCH, PCB].filter((candidate) => !PCB_ONLY || candidate.tool === "pcbnew")) {
   test.describe(`${cfg.tool} items bridge (v2, per-item s-expr)`, () => {
     test.describe.configure({ timeout: 420000 });
 
