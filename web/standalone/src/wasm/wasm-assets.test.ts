@@ -50,7 +50,7 @@ describe("resolveWasmBase", () => {
       json: async () => ({
         schema: 1,
         tag: "2.7.7",
-        tools: { pcbnew: "2.7.5", eeschema: "2.7.1" },
+        tools: { pcbnew: "2.7.5" },
       }),
     }));
     vi.stubGlobal("fetch", fetchMock);
@@ -60,9 +60,7 @@ describe("resolveWasmBase", () => {
     });
     expect(await resolve(PCBNEW)).toBe("https://cdn.pcbjam.com/wasm/pcbnew/2.7.5");
     // Manifest is fetched uncached, and only ONCE across calls (in-memory cached).
-    expect(await resolve("eeschema" as Tool)).toBe(
-      "https://cdn.pcbjam.com/wasm/eeschema/2.7.1",
-    );
+    expect(await resolve(PCBNEW)).toBe("https://cdn.pcbjam.com/wasm/pcbnew/2.7.5");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       "https://cdn.pcbjam.com/wasm/manifest-2.7.7.json",

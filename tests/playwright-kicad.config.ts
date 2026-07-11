@@ -61,6 +61,7 @@ function findFreePort(): number {
 }
 
 const port = resolvePort();
+const forceFirefoxSoftwareWebgl = !!process.env.PCBJAM_FIREFOX_SOFTWARE_WEBGL;
 
 // The merged kicad_editor wasm (~190M+ debug build; pcbnew+eeschema engines in one
 // image since editor-unification Part 2) exceeds SpiderMonkey's per-process code
@@ -180,10 +181,12 @@ export default defineConfig({
       use: {
         ...devices["Desktop Firefox"],
         viewport: { width: 1280, height: 720 },
-        // CI-only prefs: GPU-less CI VMs hit two Firefox blockers (identical on
-        // Hetzner ccx53 and ubicloud-standard-30, runs 27329612719/27330989479).
-        // Gated on CI so local runs keep stock Firefox behavior.
-        ...(process.env.CI
+        // GPU-less CI VMs hit two Firefox blockers (identical on Hetzner ccx53
+        // and ubicloud-standard-30, runs 27329612719/27330989479). Local
+        // containers can opt into the same Xvfb/software-WebGL path with
+        // PCBJAM_FIREFOX_SOFTWARE_WEBGL=1; ordinary local runs keep stock
+        // Firefox behavior.
+        ...(process.env.CI || forceFirefoxSoftwareWebgl
           ? {
               // Headless Firefox cannot create any GL context on the GPU-less CI
               // VMs (blocklist bypass still ends in FEATURE_FAILURE_WEBGL_EXHAUSTED_
@@ -199,7 +202,9 @@ export default defineConfig({
                   // time ("InternalError: out of memory") and the app never boots.
                   // Baseline-only compilation trades runtime speed for a compile
                   // that fits in memory.
-                  "javascript.options.wasm_optimizingjit": false,
+                  ...(process.env.CI
+                    ? { "javascript.options.wasm_optimizingjit": false }
+                    : {}),
                 },
               },
             }

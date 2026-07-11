@@ -94,6 +94,16 @@ const SAMPLE_PCB = `(kicad_pcb
 type FS = { mkdirTree(p: string): void; writeFile(p: string, d: string): void };
 type Mod = {
   kicadOpenFile(p: string): unknown;
+  kicadSyncEnable(): boolean;
+  kicadSyncSnapshot(): string;
+  kicadSyncOpenFile(p: string): boolean;
+  kicadCollabFitViewport(
+    cx: number,
+    cy: number,
+    halfW: number,
+    halfH: number,
+  ): void;
+  kicadCollabGetViewport(): string;
   kicadCollabSnapshot(): string;
   kicadCollabApply(j: string): unknown;
   kicadCollabTestMoveFirst(dx: number, dy: number): string;
@@ -111,7 +121,9 @@ async function bootAndOpen(page: Page, name: string): Promise<void> {
   // deliberately keeps the wizard (pcbnew.spec.ts tests it), which would block boot here.
   await page.goto("/kicad/pcbnew-collab.html");
   await expect(page.locator("#canvas")).toBeVisible({ timeout: 90000 });
-  await page.waitForFunction(() => !!window.wxElementRegistry, null, { timeout: 90000 });
+  await page.waitForFunction(() => !!window.wxElementRegistry, null, {
+    timeout: 90000,
+  });
   await page.waitForFunction(
     () => {
       const m = (window as unknown as { Module?: Mod }).Module;
@@ -130,7 +142,9 @@ async function bootAndOpen(page: Page, name: string): Promise<void> {
       !!window.wxElementRegistry &&
       window.wxElementRegistry
         .findAll({ visible: true })
-        .some((e) => /Frame$/.test(e.typeName) || (e.name || "").endsWith("Frame")),
+        .some(
+          (e) => /Frame$/.test(e.typeName) || (e.name || "").endsWith("Frame"),
+        ),
     null,
     { timeout: 90000 },
   );
@@ -151,19 +165,142 @@ async function bootAndOpen(page: Page, name: string): Promise<void> {
     { content: SAMPLE_PCB, name },
   );
 
-  await expect.poll(() => page.title(), { timeout: 30000 }).toMatch(new RegExp(name, "i"));
+  await expect
+    .poll(() => page.title(), { timeout: 30000 })
+    .toMatch(new RegExp(name, "i"));
 }
 
 test.beforeAll(() => {
-  execSync("node collab/build.mjs", { cwd: path.resolve(__dirname, ".."), stdio: "inherit" });
+  execSync("node collab/build.mjs", {
+    cwd: path.resolve(__dirname, ".."),
+    stdio: "inherit",
+  });
 });
 
 test.describe("pcbnew collab bridge — single page", () => {
-  test("snapshot reflects board by uuid/type/position", async ({ page, testLogger }) => {
+  test("native sync emits a complete board immediately after a commit", async ({
+    page,
+    testLogger,
+  }) => {
+    await bootAndOpen(page, "native-sync");
+    await page.evaluate(() => {
+      const w = window as unknown as {
+        Module: Mod;
+        kicadCollab?: { onBoardChanged?: (board: string) => void };
+        __nativeBoard?: string;
+      };
+      w.__nativeBoard = "";
+      w.kicadCollab = {
+        ...(w.kicadCollab || {}),
+        onBoardChanged: (board: string) => {
+          w.__nativeBoard = board;
+        },
+      };
+      if (!w.Module.kicadSyncEnable())
+        throw new Error("native sync listener did not attach");
+      w.Module.kicadCollabTestMoveFirst(2_000_000, 0);
+    });
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as unknown as { __nativeBoard?: string }).__nativeBoard ||
+              "",
+          ),
+        { timeout: 15000, intervals: [50, 100, 200] },
+      )
+      .toContain("(kicad_pcb");
+    const board = await page.evaluate(
+      () =>
+        (window as unknown as { __nativeBoard?: string }).__nativeBoard || "",
+    );
+    expect(board).toContain(SEG1);
+    expect(hasAbort(testLogger), "no WASM abort").toBe(false);
+  });
+
+  test("native sync reopen preserves the current pan and zoom", async ({
+    page,
+    testLogger,
+  }) => {
+    const name = "native-sync-viewport";
+    await bootAndOpen(page, name);
+
+    await page.evaluate(() => {
+      const m = (window as unknown as { Module: Mod }).Module;
+      if (!m.kicadSyncEnable())
+        throw new Error("native sync listener did not attach");
+      m.kicadCollabFitViewport(120e6, 90e6, 24e6, 18e6);
+    });
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const m = (window as unknown as { Module: Mod }).Module;
+            const vp = JSON.parse(m.kicadCollabGetViewport());
+            return (
+              Math.abs(vp.cx - 120e6) < 1e6 && Math.abs(vp.cy - 90e6) < 1e6
+            );
+          }),
+        { timeout: 20000, intervals: [100, 250] },
+      )
+      .toBe(true);
+
+    const before = await page.evaluate(() => {
+      const m = (window as unknown as { Module: Mod }).Module;
+      return JSON.parse(m.kicadCollabGetViewport()) as {
+        cx: number;
+        cy: number;
+        scale: number;
+      };
+    });
+    await page.evaluate(
+      ({ content, path }) => {
+        const w = window as unknown as { FS: FS; Module: Mod };
+        w.FS.writeFile(path, content.replace("BOARDTEXT", "REMOTE"));
+        w.Module.kicadSyncOpenFile(path);
+      },
+      { content: SAMPLE_PCB, path: `/home/kicad/documents/${name}.kicad_pcb` },
+    );
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            (
+              window as unknown as { Module: Mod }
+            ).Module.kicadSyncSnapshot().includes("REMOTE"),
+          ),
+        { timeout: 30000, intervals: [100, 250] },
+      )
+      .toBe(true);
+    const after = await page.evaluate(() => {
+      const m = (window as unknown as { Module: Mod }).Module;
+      return JSON.parse(m.kicadCollabGetViewport()) as {
+        cx: number;
+        cy: number;
+        scale: number;
+      };
+    });
+    expect(after.cx).toBeCloseTo(before.cx, -3);
+    expect(after.cy).toBeCloseTo(before.cy, -3);
+    expect(after.scale).toBeCloseTo(before.scale, 10);
+    expect(hasAbort(testLogger), "no WASM abort").toBe(false);
+  });
+
+  test("snapshot reflects board by uuid/type/position", async ({
+    page,
+    testLogger,
+  }) => {
     await bootAndOpen(page, "snap");
-    const snap = await page.evaluate(() => JSON.parse(window.Module.kicadCollabSnapshot()));
+    const snap = await page.evaluate(() =>
+      JSON.parse(window.Module.kicadCollabSnapshot()),
+    );
     const byId = new Map<string, { type: string; x: number; y: number }>(
-      snap.added.map((i: { id: string; type: string; x: number; y: number }) => [i.id, i]),
+      snap.added.map(
+        (i: { id: string; type: string; x: number; y: number }) => [i.id, i],
+      ),
     );
     expect(byId.has(SEG1)).toBe(true);
     expect(byId.get(SEG1)!.type).toBe("PCB_TRACK");
@@ -179,7 +316,10 @@ test.describe("pcbnew collab bridge — single page", () => {
     // Via/zone carry the native geometry their `added` reconstruction needs (no blob path).
     expect(byId.has(VIA1), "via present").toBe(true);
     expect(byId.get(VIA1)!.type).toBe("PCB_VIA");
-    expect((byId.get(VIA1) as { drill?: number }).drill, "via drill emitted").toBeGreaterThan(0);
+    expect(
+      (byId.get(VIA1) as { drill?: number }).drill,
+      "via drill emitted",
+    ).toBeGreaterThan(0);
     expect(byId.has(ZONE1), "zone present").toBe(true);
     expect(byId.get(ZONE1)!.type).toBe("ZONE");
     expect(
@@ -188,14 +328,21 @@ test.describe("pcbnew collab bridge — single page", () => {
     ).toBeGreaterThanOrEqual(3);
     expect(byId.has(TEXT1), "board text present").toBe(true);
     expect(byId.get(TEXT1)!.type).toBe("PCB_TEXT");
-    expect((byId.get(TEXT1) as { text?: string }).text, "board text string emitted").toBe(
-      "BOARDTEXT",
-    );
+    expect(
+      (byId.get(TEXT1) as { text?: string }).text,
+      "board text string emitted",
+    ).toBe("BOARDTEXT");
     // The text is on F.SilkS (=5). Asserting the ACTUAL layer (not just "round-trips") catches the
     // GetLayer() emit bug, where every item reported layer 0 (F.Cu) and added items landed on the
     // wrong copper layer on the peer.
-    expect((byId.get(TEXT1) as { layer?: number }).layer, "board text on F.SilkS (not stuck at 0)").toBe(5);
-    expect((byId.get(SEG1) as { layer?: number }).layer, "segment on F.Cu").toBe(0);
+    expect(
+      (byId.get(TEXT1) as { layer?: number }).layer,
+      "board text on F.SilkS (not stuck at 0)",
+    ).toBe(5);
+    expect(
+      (byId.get(SEG1) as { layer?: number }).layer,
+      "segment on F.Cu",
+    ).toBe(0);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
 
@@ -210,7 +357,10 @@ test.describe("pcbnew collab bridge — single page", () => {
     ["zone", ZONE1, "ZONE"],
     ["board text", TEXT1, "PCB_TEXT"],
   ] as const) {
-    test(`apply adds a ${label} (footprint via blob, via/zone/text native)`, async ({ page, testLogger }) => {
+    test(`apply adds a ${label} (footprint via blob, via/zone/text native)`, async ({
+      page,
+      testLogger,
+    }) => {
       await bootAndOpen(page, `add-${label}`);
 
       // Full emit-equivalent payload: snapshot item (native geometry fields) + the clipboard blob.
@@ -220,31 +370,46 @@ test.describe("pcbnew collab bridge — single page", () => {
         return { ...item, sexpr: window.Module.kicadCollabTestItemBlob(i) };
       }, id);
       expect(payload.id, `${label} in snapshot`).toBe(id);
-      const posBefore = await page.evaluate((i) => window.Module.kicadCollabGetPos(i), id);
+      const posBefore = await page.evaluate(
+        (i) => window.Module.kicadCollabGetPos(i),
+        id,
+      );
       expect(posBefore, `${label} resolvable before`).not.toBe("");
 
       // delete it
       await page.evaluate(
-        (i) => window.Module.kicadCollabApply(JSON.stringify({ added: [], changed: [], removed: [i] })),
+        (i) =>
+          window.Module.kicadCollabApply(
+            JSON.stringify({ added: [], changed: [], removed: [i] }),
+          ),
         id,
       );
       await expect
-        .poll(() => page.evaluate((i) => window.Module.kicadCollabGetPos(i), id), {
-          timeout: 10000,
-          intervals: [200],
-        })
+        .poll(
+          () => page.evaluate((i) => window.Module.kicadCollabGetPos(i), id),
+          {
+            timeout: 10000,
+            intervals: [200],
+          },
+        )
         .toBe("");
 
       // re-add it
       await page.evaluate(
-        (p) => window.Module.kicadCollabApply(JSON.stringify({ added: [p], changed: [], removed: [] })),
+        (p) =>
+          window.Module.kicadCollabApply(
+            JSON.stringify({ added: [p], changed: [], removed: [] }),
+          ),
         payload,
       );
       await expect
-        .poll(() => page.evaluate((i) => window.Module.kicadCollabGetPos(i), id), {
-          timeout: 10000,
-          intervals: [200],
-        })
+        .poll(
+          () => page.evaluate((i) => window.Module.kicadCollabGetPos(i), id),
+          {
+            timeout: 10000,
+            intervals: [200],
+          },
+        )
         .toBe(posBefore);
 
       // Fidelity beyond the anchor: a text's justification anchors its glyphs, so a peer that
@@ -259,8 +424,12 @@ test.describe("pcbnew collab bridge — single page", () => {
       expect(after.layer, `${label} layer preserved`).toBe(payload.layer);
       if (type === "PCB_TEXT") {
         expect(after.text, "text string preserved").toBe(payload.text);
-        expect(after.hjust, "text horizontal justification preserved").toBe(payload.hjust);
-        expect(after.vjust, "text vertical justification preserved").toBe(payload.vjust);
+        expect(after.hjust, "text horizontal justification preserved").toBe(
+          payload.hjust,
+        );
+        expect(after.vjust, "text vertical justification preserved").toBe(
+          payload.vjust,
+        );
       }
       expect(hasAbort(testLogger), "no WASM abort").toBe(false);
     });
@@ -274,10 +443,16 @@ test.describe("pcbnew collab bridge — single page", () => {
   // signature-mismatch trap, swallowed by the apply coroutine's catch_all → silent loop, so the apply
   // never completed. Fixed by building the embind TU with -DDEBUG in Debug builds
   // (scripts/kicad/build-kicad-target.sh). RED before the fix (move times out), GREEN after.
-  test("native-EH: a second consecutive collab apply also takes effect", async ({ page, testLogger }) => {
+  test("native-EH: a second consecutive collab apply also takes effect", async ({
+    page,
+    testLogger,
+  }) => {
     await bootAndOpen(page, "apply");
 
-    const before = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1);
+    const before = await page.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      SEG1,
+    );
     const [bx, by] = before.split(",").map(Number);
 
     const moveTo = async (x: number) => {
@@ -285,7 +460,17 @@ test.describe("pcbnew collab bridge — single page", () => {
         ({ id, x, by }) =>
           window.Module.kicadCollabApply(
             JSON.stringify({
-              changed: [{ id, type: "PCB_TRACK", sx: x, sy: by, ex: x + 50_800_000, ey: by, width: 200000 }],
+              changed: [
+                {
+                  id,
+                  type: "PCB_TRACK",
+                  sx: x,
+                  sy: by,
+                  ex: x + 50_800_000,
+                  ey: by,
+                  width: 200000,
+                },
+              ],
               added: [],
               removed: [],
             }),
@@ -293,10 +478,14 @@ test.describe("pcbnew collab bridge — single page", () => {
         { id: SEG1, x, by },
       );
       await expect
-        .poll(() => page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1), {
-          timeout: 10000,
-          intervals: [200],
-        })
+        .poll(
+          () =>
+            page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1),
+          {
+            timeout: 10000,
+            intervals: [200],
+          },
+        )
         .toBe(`${x},${by}`);
     };
 
@@ -310,17 +499,26 @@ test.describe("pcbnew collab bridge — single page", () => {
   // still needs the real app. (Same headless reality as the eeschema apply test.)
   const TRACK_ID = "55555555-0000-0000-0000-000000000001";
 
-  test("apply moves/removes/adds tracks by uuid, no echo", async ({ page, testLogger }) => {
+  test("apply moves/removes/adds tracks by uuid, no echo", async ({
+    page,
+    testLogger,
+  }) => {
     await bootAndOpen(page, "apply");
 
-    const before = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1);
+    const before = await page.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      SEG1,
+    );
     const [bx, by] = before.split(",").map(Number);
     const nx = bx + 5_000_000; // +5mm
 
     await page.evaluate(() => {
       (window as unknown as { __echo: string[] }).__echo = [];
-      (window as unknown as { kicadCollab: { onDelta: (j: string) => void } }).kicadCollab = {
-        onDelta: (j: string) => (window as unknown as { __echo: string[] }).__echo.push(j),
+      (
+        window as unknown as { kicadCollab: { onDelta: (j: string) => void } }
+      ).kicadCollab = {
+        onDelta: (j: string) =>
+          (window as unknown as { __echo: string[] }).__echo.push(j),
       };
     });
 
@@ -330,7 +528,17 @@ test.describe("pcbnew collab bridge — single page", () => {
       ({ id, nx, by }) =>
         window.Module.kicadCollabApply(
           JSON.stringify({
-            changed: [{ id, type: "PCB_TRACK", sx: nx, sy: by, ex: nx + 50_800_000, ey: by, width: 200000 }],
+            changed: [
+              {
+                id,
+                type: "PCB_TRACK",
+                sx: nx,
+                sy: by,
+                ex: nx + 50_800_000,
+                ey: by,
+                width: 200000,
+              },
+            ],
             added: [],
             removed: [],
           }),
@@ -338,23 +546,31 @@ test.describe("pcbnew collab bridge — single page", () => {
       { id: SEG1, nx, by },
     );
     await expect
-      .poll(() => page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1), {
-        timeout: 10000,
-        intervals: [200],
-      })
+      .poll(
+        () => page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG1),
+        {
+          timeout: 10000,
+          intervals: [200],
+        },
+      )
       .toBe(`${nx},${by}`);
 
     // removed: delete SEG2.
     await page.evaluate(
       (seg) =>
-        window.Module.kicadCollabApply(JSON.stringify({ changed: [], added: [], removed: [seg] })),
+        window.Module.kicadCollabApply(
+          JSON.stringify({ changed: [], added: [], removed: [seg] }),
+        ),
       SEG2,
     );
     await expect
-      .poll(() => page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG2), {
-        timeout: 10000,
-        intervals: [200],
-      })
+      .poll(
+        () => page.evaluate((id) => window.Module.kicadCollabGetPos(id), SEG2),
+        {
+          timeout: 10000,
+          intervals: [200],
+        },
+      )
       .toBe("");
 
     // added: a new track reconstructs by uuid (native PCB_TRACK build — no clipboard Parse).
@@ -383,12 +599,16 @@ test.describe("pcbnew collab bridge — single page", () => {
     await expect
       .poll(
         async () =>
-          (await page.evaluate(() => window.Module.kicadCollabSnapshot())).includes(TRACK_ID),
+          (
+            await page.evaluate(() => window.Module.kicadCollabSnapshot())
+          ).includes(TRACK_ID),
         { timeout: 10000, intervals: [250] },
       )
       .toBe(true);
 
-    const echoes = await page.evaluate(() => (window as unknown as { __echo: string[] }).__echo);
+    const echoes = await page.evaluate(
+      () => (window as unknown as { __echo: string[] }).__echo,
+    );
     expect(echoes, "apply() must not echo a local onDelta").toHaveLength(0);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
@@ -404,10 +624,16 @@ test.describe("pcbnew collab bridge — single page", () => {
   }) => {
     await bootAndOpen(page, "fptext");
 
-    const fpBefore = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), FP1);
+    const fpBefore = await page.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      FP1,
+    );
 
     for (const childId of [FP1_REF, FP1_TXT]) {
-      const before = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), childId);
+      const before = await page.evaluate(
+        (id) => window.Module.kicadCollabGetPos(id),
+        childId,
+      );
       expect(before, `child ${childId} resolvable`).not.toBe("");
       const [cx, cy] = before.split(",").map(Number);
       const ny = cy + 3_000_000; // +3mm in Y
@@ -415,20 +641,31 @@ test.describe("pcbnew collab bridge — single page", () => {
       await page.evaluate(
         ({ id, cx, ny }) =>
           window.Module.kicadCollabApply(
-            JSON.stringify({ changed: [{ id, x: cx, y: ny }], added: [], removed: [] }),
+            JSON.stringify({
+              changed: [{ id, x: cx, y: ny }],
+              added: [],
+              removed: [],
+            }),
           ),
         { id: childId, cx, ny },
       );
       await expect
-        .poll(() => page.evaluate((id) => window.Module.kicadCollabGetPos(id), childId), {
-          timeout: 10000,
-          intervals: [200],
-        })
+        .poll(
+          () =>
+            page.evaluate((id) => window.Module.kicadCollabGetPos(id), childId),
+          {
+            timeout: 10000,
+            intervals: [200],
+          },
+        )
         .toBe(`${cx},${ny}`);
     }
 
     // The footprint origin must be unchanged — only the child text moved.
-    const fpAfter = await page.evaluate((id) => window.Module.kicadCollabGetPos(id), FP1);
+    const fpAfter = await page.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      FP1,
+    );
     expect(fpAfter, "footprint did not move").toBe(fpBefore);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
@@ -450,31 +687,50 @@ test.describe("pcbnew collab bridge — two tabs (BroadcastChannel)", () => {
     const startCollab = (p: Page) =>
       p.evaluate(async (ch) => {
         const w = window as unknown as {
-          KicadCollab: { start: (m: unknown, win: unknown, o: unknown) => Promise<unknown> };
+          KicadCollab: {
+            start: (m: unknown, win: unknown, o: unknown) => Promise<unknown>;
+          };
           Module: unknown;
         };
-        await w.KicadCollab.start(w.Module, window, { provider: { kind: "broadcastchannel", settleMs: 500 }, room: ch });
+        await w.KicadCollab.start(w.Module, window, {
+          provider: { kind: "broadcastchannel", settleMs: 500 },
+          room: ch,
+        });
       }, channel);
     await startCollab(tabA);
     await startCollab(tabB);
 
-    const uuid = await tabA.evaluate(() => window.Module.kicadCollabTestMoveFirst(2_000_000, 0));
+    const uuid = await tabA.evaluate(() =>
+      window.Module.kicadCollabTestMoveFirst(2_000_000, 0),
+    );
     expect(uuid).toMatch(/[0-9a-f-]{36}/);
-    const orig = await tabA.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid);
+    const orig = await tabA.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      uuid,
+    );
 
     await expect
-      .poll(() => tabA.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid), {
-        timeout: 15000,
-        intervals: [300],
-      })
+      .poll(
+        () => tabA.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid),
+        {
+          timeout: 15000,
+          intervals: [300],
+        },
+      )
       .not.toBe(orig);
-    const posA = await tabA.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid);
+    const posA = await tabA.evaluate(
+      (id) => window.Module.kicadCollabGetPos(id),
+      uuid,
+    );
 
     await expect
-      .poll(() => tabB.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid), {
-        timeout: 15000,
-        intervals: [300],
-      })
+      .poll(
+        () => tabB.evaluate((id) => window.Module.kicadCollabGetPos(id), uuid),
+        {
+          timeout: 15000,
+          intervals: [300],
+        },
+      )
       .toBe(posA);
 
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);

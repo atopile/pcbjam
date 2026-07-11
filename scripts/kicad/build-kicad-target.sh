@@ -91,6 +91,21 @@ case "$APP_NAME" in
         ;;
 esac
 
+# The deployed product is a PCB-layout editor, not the full KiCad application
+# suite.  Standalone pcbnew therefore uses the lean profile by default; set
+# PCBJAM_PCB_ONLY=0 for an upstream-comparison/debug build.
+if [ "${APP_NAME}" = "pcbnew" ]; then
+    PCBJAM_PCB_ONLY="${PCBJAM_PCB_ONLY:-1}"
+else
+    PCBJAM_PCB_ONLY="${PCBJAM_PCB_ONLY:-0}"
+fi
+
+if [ "${PCBJAM_PCB_ONLY}" = "1" ]; then
+    BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-OFF}"
+else
+    BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-ON}"
+fi
+
 # Which app's embind bindings to compile + link. Most apps use their own.
 # NOTE sym_convert deliberately does NOT reuse eeschema's embind object even
 # though it links the eeschema kiface: the kiface references exactly one embind
@@ -235,7 +250,11 @@ fi
 if [ $SKIP_DEPS -eq 0 ]; then
     kw_stage deps
     log_info "Building dependencies..."
-    "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
+    if [ "${PCBJAM_PCB_ONLY}" = "1" ]; then
+        "${SCRIPT_DIR}/../deps/build-all-deps.sh"
+    else
+        "${SCRIPT_DIR}/../deps/build-all-deps.sh" --with-occ
+    fi
 else
     log_info "Skipping dependencies (use --build-deps or --full to build)"
 fi
@@ -457,8 +476,20 @@ if [ "${APP_NAME}" = "occ_service" ]; then
     OCC_SERVICE_CMAKE_FLAG="-DKICAD_OCC_SERVICE_WASM=ON"
 fi
 
-# 3D viewer: built by DEFAULT (BUILD_3D_VIEWER=ON). Opt out with BUILD_3D_VIEWER=OFF, which links the
-# 3D stubs instead. The default renderer is still the GL-free CPU raytracer
+# Standalone pcbnew-only configuration.  This skips configuring the unrelated
+# KiCad applications and exposes PCBJAM_PCB_ONLY to the small number of UI
+# translation units that need to remove desktop-suite chrome.
+PCB_ONLY_CMAKE_FLAG=""
+PCB_ONLY_DEFINE=""
+IPC_API_CMAKE_FLAG="-DKICAD_IPC_API=ON"
+if [ "${PCBJAM_PCB_ONLY}" = "1" ]; then
+    PCB_ONLY_CMAKE_FLAG="-DKICAD_WASM_PCB_ONLY=ON"
+    PCB_ONLY_DEFINE=" -DPCBJAM_PCB_ONLY=1"
+fi
+
+# 3D viewer: the PCB-only profile defaults OFF and links the existing stubs.
+# Comparison/full-suite builds retain the historical ON default. The renderer
+# is the GL-free CPU raytracer
 # (RENDER_3D_RAYTRACE_RAM) blitted through a WebGL2 textured quad, but KiCad's fixed-function
 # OpenGL renderer (RENDER_3D_OPENGL) now links against the REAL GL1->WebGL2 emulation layer
 # (wasm/gl1, no -sLEGACY_GL_EMULATION): the shim implements the FFP-only entry points and
@@ -466,7 +497,6 @@ fi
 # Regression gate: tests/3d-regression (47 golden scenarios). The KiCad CMake option
 # KICAD_BUILD_3D_VIEWER_WASM stays OFF upstream; our build passes it explicitly.
 # See wasm/gl1/README.md and docs/features/fork-cleanup/10-3d-viewer.md.
-BUILD_3D_VIEWER="${BUILD_3D_VIEWER:-ON}"
 GL3D_LINK_FLAGS=""
 if [ "${BUILD_3D_VIEWER}" = "ON" ]; then
     log_info "3D viewer ENABLED for WASM (BUILD_3D_VIEWER=ON) — compiling wasm/gl1 FFP shim"
@@ -490,15 +520,21 @@ fi
 # Mirrors the wasm/gl1 pattern (compile to .o, add to the link). Shim:
 # wasm/shims/nanosleep_yield.c; its EM_ASYNC_JS yield is covered by env.__asyncjs__* in
 # scripts/common/asyncify-imports.txt.
-emcc -c -pthread "${PROJECT_ROOT}/wasm/shims/nanosleep_yield.c" -o "${STUBS_BUILD}/nanosleep_yield.o"
-NANOSLEEP_YIELD_LINK="${STUBS_BUILD}/nanosleep_yield.o"
+NANOSLEEP_YIELD_LINK=""
+if [ "${BUILD_3D_VIEWER}" = "ON" ]; then
+    emcc -c -pthread "${PROJECT_ROOT}/wasm/shims/nanosleep_yield.c" -o "${STUBS_BUILD}/nanosleep_yield.o"
+    NANOSLEEP_YIELD_LINK="${STUBS_BUILD}/nanosleep_yield.o"
+fi
 
 # mallinfo() stub for the mimalloc build: -sMALLOC=mimalloc doesn't export the
 # glibc mallinfo() that OpenCASCADE's OSD_MemInfo.cxx (libTKernel, pcbnew's 3D)
 # references — without this the pcbnew link fails `undefined symbol: mallinfo`.
 # Zeroed no-op (memory reporting only); harmless for apps that don't reference it.
-emcc -c "${PROJECT_ROOT}/wasm/shims/mallinfo_stub.c" -o "${STUBS_BUILD}/mallinfo_stub.o"
-MALLINFO_STUB_LINK="${STUBS_BUILD}/mallinfo_stub.o"
+MALLINFO_STUB_LINK=""
+if [ "${BUILD_3D_VIEWER}" = "ON" ] || [ "${APP_NAME}" = "occ_service" ]; then
+    emcc -c "${PROJECT_ROOT}/wasm/shims/mallinfo_stub.c" -o "${STUBS_BUILD}/mallinfo_stub.o"
+    MALLINFO_STUB_LINK="${STUBS_BUILD}/mallinfo_stub.o"
+fi
 
 # Pre-warmed Web Worker pool size (emscripten pthreads). The 3D-viewer CPU raytracer runs
 # KiCad's shared thread pool (hardware_concurrency long-lived threads, created at startup)
@@ -521,13 +557,14 @@ emcmake cmake "${KICAD_DIR}" \
     ${SYM_CONVERTER_CMAKE_FLAG} \
     ${MERGED_EDITOR_CMAKE_FLAG} \
     ${OCC_SERVICE_CMAKE_FLAG} \
+    ${PCB_ONLY_CMAKE_FLAG} \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
     -DCMAKE_INSTALL_PREFIX="${SYSROOT}" \
     -DCMAKE_MODULE_PATH="${WASM_LAYER}/cmake" \
     -DSYSROOT="${SYSROOT}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -Xclang -fno-pch-timestamp -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES} -I${SYSROOT}/include -I${STUBS_DIR} -include ${STUBS_DIR}/char_traits_uint16_workaround.h" \
-    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1 -I${SYSROOT}/include -I${STUBS_DIR}" \
+    -DCMAKE_CXX_FLAGS="${EXTRA_FLAGS} -Xclang -fno-pch-timestamp -pthread -sUSE_ZLIB=1 -DKICAD_USE_PLATFORM_WASM=1${DIAG_DEFINES}${PCB_ONLY_DEFINE} -I${SYSROOT}/include -I${STUBS_DIR} -include ${STUBS_DIR}/char_traits_uint16_workaround.h" \
+    -DCMAKE_C_FLAGS="${EXTRA_FLAGS} -pthread -sUSE_ZLIB=1${PCB_ONLY_DEFINE} -I${SYSROOT}/include -I${STUBS_DIR}" \
     -DCMAKE_EXE_LINKER_FLAGS="${LINKER_DEBUG_FLAGS} -pthread -sUSE_ZLIB=1 -sASYNCIFY=1 -sDYNCALLS=1 -sASYNCIFY_STACK_SIZE=65536 -sUSE_PTHREADS=1 -sMALLOC=mimalloc -sPTHREAD_POOL_SIZE='${PTHREAD_POOL_EXPR}' -sPTHREAD_POOL_SIZE_STRICT=0 -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=4GB -sMAX_WEBGL_VERSION=2 ${GL3D_LINK_FLAGS} ${NANOSLEEP_YIELD_LINK} ${MALLINFO_STUB_LINK} -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','UTF8ToString','stringToUTF8','lengthBytesUTF8','dynCall'] -sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=['\$dynCall'] ${EMBIND_LINK_FLAG} -L${SYSROOT}/lib ${STUBS_BUILD}/libgit2_stub.a ${STUBS_BUILD}/libcurl_stub.a${APP_STUB_LINK} ${STUBS_BUILD}/libnng_stub.a ${EMBIND_OBJ}" \
     -DCMAKE_PREFIX_PATH="${SYSROOT};${WX_BUILD}" \
     -DwxWidgets_CONFIG_EXECUTABLE="${WX_BUILD}/wx-config" \
@@ -537,7 +574,7 @@ emcmake cmake "${KICAD_DIR}" \
     -DKICAD_USE_EGL=OFF \
     -DKICAD_USE_BUNDLED_GLEW=ON \
     -DKICAD_BUILD_3D_VIEWER_WASM=${BUILD_3D_VIEWER} \
-    -DKICAD_IPC_API=ON \
+    ${IPC_API_CMAKE_FLAG} \
     -DKICAD_USE_PCH=ON \
     \
     -DZSTD_ROOT="${SYSROOT}" \

@@ -159,11 +159,17 @@ test.describe('PCBnew WASM', () => {
         await waitForEditorReady(page);
         const metrics = await getCanvasMetrics(page);
         const registryMetrics = await getRegistryMetrics(page);
+        const menuLabels = await page.evaluate(() =>
+            window.wxElementRegistry?.findAllRendered?.({ elementType: 'menuitem', subType: 'menubar' })
+                .map((item) => item.label.replace(/&/g, '')) ?? []
+        );
 
         expect(metrics.dpr).toBeGreaterThanOrEqual(1);
         expect(metrics.mainCanvas).not.toBeNull();
         expect(metrics.glCanvas).not.toBeNull();
         expect(registryMetrics.toolbars.length).toBeGreaterThanOrEqual(4);
+        expect(menuLabels).toEqual(['Edit', 'View', 'Place', 'Route', 'Inspect', 'Board']);
+        expect(menuLabels).not.toContain('File');
 
         const mainCanvas = metrics.mainCanvas!;
         const glCanvas = metrics.glCanvas!;

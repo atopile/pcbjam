@@ -35,14 +35,12 @@ export const TOOL_ARGV0: Record<Tool, string> = {
 };
 
 /**
- * A deployed WASM bundle (CDN folder + `<bundle>.{wasm,js}` basenames). NOT the same
- * space as `Tool`: since editor-unification Part 2 the four editor TOOLS (pcbnew,
- * eeschema, footprint_editor, symbol_editor) are all served by the ONE merged
- * `kicad_editor` bundle — two engines (kifaces) statically linked, the frame chosen
- * at runtime (`TOOL_FRAME`). Deliberately not part of the `TOOLS` enum: a bundle is
- * a delivery artifact, not a user-facing tool/route.
+ * A built WASM bundle (CDN folder + `<bundle>.{wasm,js}` basenames). The deployed
+ * PCB-only product resolves pcbnew directly; the remaining values are retained
+ * temporarily for old manifests while their web routes are removed.
  */
 export type Bundle =
+  | "pcbnew"
   | "kicad_editor"
   | "calculator"
   | "pl_editor"
@@ -53,13 +51,12 @@ export type Bundle =
   | "occ_service";
 
 /**
- * Which deployed WASM bundle actually backs each tool. The four editors share the
- * merged `kicad_editor` engine image (editor-unification Part 2); the remaining
- * tools are genuinely separate engines and back their own bundles. Used to resolve
- * the CDN asset folder and the `<bundle>.{wasm,js}` filenames.
+ * Which WASM bundle backs each legacy tool route. Only pcbnew is published by the
+ * PCB-only release; the other mappings make old manifests fail explicitly instead
+ * of silently loading pcbnew for an unsupported document type.
  */
 export const TOOL_BUNDLE: Record<Tool, Bundle> = {
-  pcbnew: "kicad_editor",
+  pcbnew: "pcbnew",
   eeschema: "kicad_editor",
   calculator: "calculator",
   pl_editor: "pl_editor",

@@ -11,7 +11,7 @@
 #   calculator     PCB calculator
 #   pl_editor      drawing-sheet editor
 #   gerbview       Gerber viewer
-#   all            build all of the above
+#   all            build the deployed product (pcbnew only)
 #   pcbnew         standalone PCB engine (debug aid; not deployed — kicad_editor is)
 #   eeschema       standalone schematic engine (debug aid; not deployed)
 #
@@ -104,12 +104,11 @@ APP_NAME="$1"
 shift
 
 # Expand the app argument into APPS[]: "all", a single app, or a comma list.
-# kicad_editor first in "all" — the merged image is the largest bundle, so its
-# host-side wasm-opt chain is the critical path and must start as early as
-# possible (especially with KICAD_PIPELINE=1). pcbnew/eeschema stay buildable as
-# standalone debug aids but are not part of "all" (not deployed).
+# The deployed product is the standalone PCB editor. Other app names remain
+# accepted as developer/debug aids while the feature-removal patches are split
+# into reviewable steps, but they are not part of "all" or the release bundle.
 if [[ "$APP_NAME" == "all" ]]; then
-    APPS=(kicad_editor occ_service calculator pl_editor gerbview)
+    APPS=(pcbnew)
 else
     IFS=',' read -r -a APPS <<< "$APP_NAME"
     for app in "${APPS[@]}"; do

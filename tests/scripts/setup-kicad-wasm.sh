@@ -79,19 +79,10 @@ copy_app() {
 }
 
 found_any=0
-# The four editors (pcbnew / eeschema / footprint_editor / symbol_editor) are ALL
-# served by the ONE merged kicad_editor bundle: their harness HTMLs load
-# kicad_editor.js and select the frame at runtime via --frame (editor-unification
-# Part 2).
-copy_app kicad_editor     && found_any=1
-copy_app calculator       && found_any=1
-copy_app pl_editor        && found_any=1
-copy_app gerbview         && found_any=1
-# OCC 3D service (lazy worker module; pcbnew's STEP export + model parsing)
-copy_app occ_service      || true
+copy_app pcbnew && found_any=1
 
 if [ "$found_any" -eq 0 ]; then
-    echo "Error: no kicad_editor/calculator/pl_editor/gerbview artifacts found in output/ or docker volume" >&2
+    echo "Error: no pcbnew artifact found in output/ or docker volume" >&2
     exit 1
 fi
 
@@ -114,21 +105,6 @@ if [ -f "$OUTPUT_DIR/wx-dom.js" ]; then
     smart_cp "$OUTPUT_DIR/wx-dom.js" "$KICAD_TEST"
 else
     smart_cp "$PROJECT_ROOT/wxwidgets/build/wasm/wx-dom.js" "$KICAD_TEST"
-fi
-
-# Demo board for the gerbview print test (tests/apps/kicad/gerbview-print.html).
-# Provisioned (not committed; gitignored) from the canonical demo board, same
-# pattern as the wasm artifacts above. gerbview-print.html fetches the subset of
-# layers it needs from ./board/, so copying the whole set is harmless.
-BOARD_SRC="$PROJECT_ROOT/site/public/gerber-demo/board"
-if [ -d "$BOARD_SRC" ]; then
-    echo "Provisioning gerbview demo board..."
-    mkdir -p "$KICAD_TEST/board"
-    for f in "$BOARD_SRC"/tinytapeout-demo-*; do
-        smart_cp "$f" "$KICAD_TEST/board"
-    done
-else
-    echo "  (demo board source $BOARD_SRC not found — skipping)"
 fi
 
 echo "KiCad WASM files synced to $KICAD_TEST"

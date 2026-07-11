@@ -12,6 +12,10 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/bind.h>
+#include <wx/app.h>
+#include <wx/event.h>
+#include <wx/string.h>
+#include <wx/window.h>
 #include <board.h>
 #include <board_commit.h>
 #include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
@@ -59,10 +63,6 @@
 #include <set>
 #include <string>
 #include <vector>
-#include <wx/app.h>
-#include <wx/event.h>
-#include <wx/string.h>
-#include <wx/window.h>
 
 using namespace emscripten;
 using json = nlohmann::json;
@@ -78,8 +78,9 @@ using json = nlohmann::json;
 // the frame-agnostic duplicates (this + kicadCollabOnSave) and the shared-name
 // registrations live once in kicad_editor_embind.cpp, which dispatches the per-editor
 // entries (renamed pcbCollab*/schCollab* below; JS-facing names are unchanged).
-#ifndef KICAD_MERGED_EMBIND
-bool kicadOpenFile( std::string path )
+namespace {
+
+bool openProjectFile( const std::string& aPath )
 {
     KIWAY_PLAYER* frame =
             wxTheApp ? static_cast<KIWAY_PLAYER*>( wxTheApp->GetTopWindow() ) : nullptr;
@@ -91,7 +92,17 @@ bool kicadOpenFile( std::string path )
         blocking->Close( true );
 
     return frame->OpenProjectFiles(
-            std::vector<wxString>( 1, wxString::FromUTF8( path.c_str() ) ) );
+            std::vector<wxString>( 1, wxString::FromUTF8( aPath.c_str() ) ) );
+}
+
+bool pcbSyncOpenFile( std::string aPath );
+
+} // namespace
+
+#ifndef KICAD_MERGED_EMBIND
+bool kicadOpenFile( std::string path )
+{
+    return pcbSyncOpenFile( path );
 }
 #endif // !KICAD_MERGED_EMBIND
 
@@ -620,6 +631,54 @@ void rebaseline()
     g_dirty.clear();
 }
 
+// Serialize directly from the live BOARD.  Unlike kicadSaveBoard this never
+// touches MEMFS, so web hosts can publish a committed edit in the same event
+// turn instead of waiting for an asynchronous file save to settle.
+std::string serializeBoard( BOARD* aBoard )
+{
+    if( !aBoard )
+        return {};
+
+    try
+    {
+        PCB_IO_KICAD_SEXPR io;
+        STRING_FORMATTER   formatter;
+        io.FormatBoardToFormatter( &formatter, aBoard, nullptr );
+        return formatter.GetString();
+    }
+    catch( ... )
+    {
+        return {};
+    }
+}
+
+void emitBoardChanged( BOARD* aBoard )
+{
+    if( !EM_ASM_INT( {
+            return !!( window.kicadCollab && window.kicadCollab.onBoardChanged );
+        } ) )
+        return;
+
+    std::string board = serializeBoard( aBoard );
+
+    if( board.empty() )
+        return;
+
+    EM_ASM( {
+        var bridge = window.kicadCollab;
+        if( bridge && bridge.onBoardChanged )
+            bridge.onBoardChanged( UTF8ToString( $0, $1 ) );
+    }, board.data(), board.size() );
+}
+
+bool hasItemDiffListener()
+{
+    return EM_ASM_INT( {
+        var bridge = window.kicadCollab;
+        return !!( bridge && ( bridge.onDelta || bridge.onItems ) );
+    } );
+}
+
 // TARGETED rebaseline (bug 05): refresh baseline entries ONLY for the uuids a remote
 // apply touched. A global rebaseline() here would fold a concurrently-committed local
 // edit (its flush is queued BEHIND the apply on the same pending-event list) into the
@@ -681,6 +740,22 @@ void flushDiff()
         return;
 
     BOARD*                      board = fr->GetBoard();
+
+    // This is the PCB editor's native persistence signal.  Emit the complete,
+    // settled board before the optional item-diff bridge does its heavier
+    // projection/blob work; a host that only needs file synchronization does
+    // not depend on Yjs or on browser input heuristics.
+    emitBoardChanged( board );
+
+    // The atopile file-sync host does not consume item-level collaboration
+    // payloads.  Avoid walking and blob-serializing the board a second time
+    // unless a Yjs transport has actually installed those callbacks.
+    if( !hasItemDiffListener() )
+    {
+        g_dirty.clear();
+        return;
+    }
+
     std::map<std::string, json> cur   = snapshotByUuid( *board );
 
     json added = json::array(), changed = json::array(), removed = json::array();
@@ -831,6 +906,7 @@ public:
     void OnBoardItemsRemoved( BOARD&, std::vector<BOARD_ITEM*>& v ) override    { trigger( v ); }
     void OnBoardItemChanged( BOARD&, BOARD_ITEM* i ) override                   { trigger( { i } ); }
     void OnBoardItemsChanged( BOARD&, std::vector<BOARD_ITEM*>& v ) override    { trigger( v ); }
+    void OnBoardNetSettingsChanged( BOARD& ) override                           { trigger( {} ); }
     void OnBoardCompositeUpdate( BOARD&, std::vector<BOARD_ITEM*>& a,
                                  std::vector<BOARD_ITEM*>& r,
                                  std::vector<BOARD_ITEM*>& c ) override
@@ -856,7 +932,18 @@ private:
     }
 };
 
-COLLAB_LISTENER* g_listener = nullptr;
+COLLAB_LISTENER* g_listener      = nullptr;
+BOARD*           g_listenedBoard = nullptr;
+
+void detachBridge()
+{
+    if( g_listener && g_listenedBoard )
+        g_listenedBoard->RemoveListener( g_listener );
+
+    g_listenedBoard = nullptr;
+    g_flushScheduled = false;
+    g_dirty.clear();
+}
 
 // Get the live BOARD and ensure our listener is registered on it (idempotent).
 BOARD* ensureBridge()
@@ -869,12 +956,100 @@ BOARD* ensureBridge()
     BOARD* board = fr->GetBoard();
 
     if( !g_listener )
-    {
         g_listener = new COLLAB_LISTENER();
+
+    if( g_listenedBoard != board )
+    {
+        if( g_listenedBoard )
+            g_listenedBoard->RemoveListener( g_listener );
+
         board->AddListener( g_listener );
+        g_listenedBoard = board;
     }
 
     return board;
+}
+
+// Opt in to native board synchronization after the initial board is open.
+// Re-baselining keeps the pre-existing item-diff bridge from reporting the
+// loaded document as a local edit.
+bool pcbSyncEnable()
+{
+    if( !ensureBridge() )
+        return false;
+
+    rebaseline();
+    return true;
+}
+
+// Replace the board from a staged MEMFS file while preserving the listener
+// lifecycle.  Detaching before OpenProjectFiles is important: pcbnew destroys
+// the old BOARD during the open, so attempting to detach afterwards would use
+// a dangling pointer.  The applying guard also prevents a remote replacement
+// from echoing back as a local modification.
+bool pcbSyncOpenFile( std::string aPath )
+{
+    // OpenProjectFiles frames the newly loaded board.  That is desirable for
+    // the first document, but disruptive for an authoritative live-sync
+    // replacement: every atopile edit would throw away the user's pan/zoom.
+    // A registered listener distinguishes a sync replacement from initial
+    // boot, so preserve the exact GAL transform only in the former case.
+    PCB_EDIT_FRAME* oldFrame = pcbFrame();
+    KIGFX::VIEW*    oldView = oldFrame && oldFrame->GetCanvas()
+                                   ? oldFrame->GetCanvas()->GetView()
+                                   : nullptr;
+    bool            preserveViewport = g_listenedBoard && oldView;
+    VECTOR2D        viewportCenter;
+    double          viewportScale = 1.0;
+
+    if( preserveViewport )
+    {
+        viewportCenter = oldView->GetCenter();
+        viewportScale = oldView->GetScale();
+    }
+
+    detachBridge();
+
+    // This API is an authoritative host replacement, equivalent to pcbnew's
+    // RevertDocument path: the outgoing model was already published by
+    // onBoardChanged, so never raise an unsaved-changes dialog while applying
+    // an incoming version. Releasing the lock also lets the same MEMFS path be
+    // reopened repeatedly during a sync session.
+    if( PCB_EDIT_FRAME* frame = pcbFrame() )
+    {
+        if( frame->GetScreen() )
+            frame->GetScreen()->SetContentModified( false );
+
+        frame->ReleaseFile();
+    }
+
+    s_applyingRemote = true;
+    bool opened = openProjectFile( aPath );
+    s_applyingRemote = false;
+
+    if( ensureBridge() )
+    {
+        rebaseline();
+    }
+
+    if( preserveViewport )
+    {
+        if( PCB_EDIT_FRAME* frame = pcbFrame(); frame && frame->GetCanvas() )
+        {
+            KIGFX::VIEW* view = frame->GetCanvas()->GetView();
+            view->SetScale( viewportScale );
+            view->SetCenter( viewportCenter );
+            frame->GetCanvas()->ForceRefresh();
+        }
+    }
+
+    return opened;
+}
+
+std::string pcbSyncSnapshot()
+{
+    PCB_EDIT_FRAME* frame = pcbFrame();
+    return frame ? serializeBoard( frame->GetBoard() ) : std::string();
 }
 
 // The actual model mutation, via BOARD_COMMIT so connectivity + ratsnest recompute exactly as
@@ -1959,6 +2134,11 @@ EMSCRIPTEN_BINDINGS(pcbnew) {
 
     // Programmatic save of the in-memory board (round-trip tests, README §A).
     function("kicadSaveBoard", &kicadSaveBoard);
+    // Event-driven host persistence: enable native commit notifications,
+    // serialize without MEMFS, and safely replace the live BOARD on reload.
+    function("kicadSyncEnable", &pcbSyncEnable);
+    function("kicadSyncSnapshot", &pcbSyncSnapshot);
+    function("kicadSyncOpenFile", &pcbSyncOpenFile);
     // pcbnew-only test helper (no eeschema counterpart — name is not shared).
     function("kicadCollabTestItemBlob", &kicadCollabTestItemBlob);
     // pcbnew-only ysync-review repro hooks (names not shared with eeschema).

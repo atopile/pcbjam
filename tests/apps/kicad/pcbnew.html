@@ -152,9 +152,7 @@
     var Module = {
       thisProgram: '/usr/bin/pcbnew',  // Fake absolute path for argv[0] (KiCad DEBUG check)
 
-      // The PCB editor is served by the merged kicad_editor bundle (editor-
-      // unification Part 2): load kicad_editor.js below and select
-      // FRAME_PCB_EDITOR at runtime.
+      // Standalone pcbnew is the deployed PCB-only engine.
       arguments: ['--frame=pcb'],
 
       preRun: [createCanvas, writeResources, setupHomeDir, seedKicadConfig],
@@ -212,7 +210,6 @@
   <!-- wxWidgets WASM glue code (defines getConfigEntryLength, etc.) -->
   <script src="wx.js"></script>
   <script src="wx-dom.js"></script>
-  <!-- PCB editor = merged kicad_editor bundle + --frame=pcb (editor-unification Part 2). -->
-  <script async src="kicad_editor.js"></script>
+  <script async src="pcbnew.js"></script>
 </body>
 </html>
