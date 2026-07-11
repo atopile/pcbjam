@@ -96,7 +96,7 @@ type Mod = {
   kicadOpenFile(p: string): unknown;
   kicadSyncEnable(): boolean;
   kicadSyncSnapshot(): string;
-  kicadSyncOpenFile(p: string): boolean;
+  kicadSyncOpenFile(p: string): Promise<boolean>;
   kicadCollabFitViewport(
     cx: number,
     cy: number,
@@ -259,7 +259,7 @@ test.describe("pcbnew collab bridge — single page", () => {
       ({ content, path }) => {
         const w = window as unknown as { FS: FS; Module: Mod };
         w.FS.writeFile(path, content.replace("BOARDTEXT", "REMOTE"));
-        w.Module.kicadSyncOpenFile(path);
+        return w.Module.kicadSyncOpenFile(path);
       },
       { content: SAMPLE_PCB, path: `/home/kicad/documents/${name}.kicad_pcb` },
     );

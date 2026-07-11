@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === "1";
+
 /**
  * onSave hook e2e (standalone-hardening 0005, save routing): a real user
  * File→Save (Ctrl+S through the wx accelerator path) must fire
@@ -221,11 +223,13 @@ test.describe("user File→Save fires window.kicadCollab.onSave", () => {
   test.describe.configure({ timeout: 300000 });
 
   test("pl_editor: Ctrl+S → onSave with the saved MEMFS path", async ({ page, testLogger }) => {
+    test.skip(PCB_ONLY, "PCB-only product build");
     void testLogger;
     await expectSaveHookFires(page, PL);
   });
 
   test("eeschema: Ctrl+S → onSave with the saved MEMFS path", async ({ page, testLogger }) => {
+    test.skip(PCB_ONLY, "PCB-only product build");
     void testLogger;
     await expectSaveHookFires(page, SCH);
   });
