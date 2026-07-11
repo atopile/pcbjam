@@ -1,6 +1,6 @@
 name: screenshot-changelog
 
-# Discord trigger B: when a push to main changes committed baseline PNGs, post an
+# Discord trigger B: when a push to atopile/main changes committed baseline PNGs, post an
 # old | new+boxes | heatmap triptych per changed baseline (ADDED image / REMOVED
 # title too). No build, no GPU — it only diffs two git revisions of PNGs that are
 # already CI-rendered, so it runs in ~30s. Complements the re-render drift gate in
@@ -9,7 +9,7 @@ name: screenshot-changelog
 
 on:
   push:
-    branches: [main]
+    branches: [atopile/main]
     paths:
       - 'tests/baseline-screenshots/**.png'
       - 'tests/e2e/baseline-screenshots/**.png'

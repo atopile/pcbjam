@@ -1,11 +1,11 @@
 [submodule "kicad"]
 	path = kicad
-	url = https://github.com/emergence-engineering/kicad-source-mirror.git
-	branch = wasm-port
+	url = https://github.com/atopile/kicad.git
+	branch = atopile/main
 [submodule "wxwidgets"]
 	path = wxwidgets
-	url = https://github.com/emergence-engineering/wxWidgets.git
-	branch = wasm-port
+	url = https://github.com/atopile/wxWidgets.git
+	branch = atopile/main
 [submodule "web/pcbjam-shared"]
 	path = web/pcbjam-shared
 	url = https://github.com/emergence-engineering/pcbjam-shared.git

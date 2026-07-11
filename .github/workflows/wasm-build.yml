@@ -1,11 +1,11 @@
 name: wasm-build (reusable)
 
-# THE single KiCad WASM build+test recipe, called by ci-ubicloud.yml (main/PR) and
+# THE single KiCad WASM build+test recipe, called by ci.yml (atopile/main/PR) and
 # release.yml (tag). Both build the SAME way — the asyncify `wasm-opt` tail is -O1
 # everywhere — so the build can never diverge from what ships (the bug that shipped
-# a -O1 / 3D-off demo while CI built -O1 / 3D-on). The opt_level input remains as an
+# different product bundles in CI and release). The opt_level input remains as an
 # escape hatch for a one-off -O2 build, but is -O1 for both real callers, so a tag
-# release FINAL-cache-hits main's build and skips the asyncify tail entirely.
+# release FINAL-cache-hits atopile/main's build and skips the asyncify tail entirely.
 #
 # Two-tier output cache around docker/build.sh's --compile-only / --postprocess-only
 # split. The expensive container compile (→ base wasm) is opt- and binaryen-
@@ -27,9 +27,9 @@ on:
         type: string
         default: "-O1"
       build_3d_viewer:
-        description: "Build the WASM 3D viewer into kicad_editor (ON/OFF)"
+        description: "Build the WASM 3D viewer (OFF for the web-IDE asset)"
         type: string
-        default: "ON"
+        default: "OFF"
       run_tests:
         description: "Run the wxWidgets + KiCad e2e suites after building"
         type: boolean
@@ -44,7 +44,7 @@ on:
         default: false
     secrets:
       # Declared so this reusable workflow may reference ${{ secrets.DISCORD_WEBHOOK_URL }}
-      # (an undeclared secret reference is a workflow startup failure). ci-ubicloud.yml
+      # (an undeclared secret reference is a workflow startup failure). ci.yml
       # passes it via `secrets: inherit`; release.yml doesn't (required: false) → the
       # screenshot/perf report step just no-ops there.
       DISCORD_WEBHOOK_URL:
@@ -52,11 +52,11 @@ on:
 
 jobs:
   build-and-test:
-    name: Build all tools + KiCad e2e (Ubicloud)
+    name: Build PCB editor + KiCad e2e
     # Don't run untrusted fork PRs on the paid runner (push/dispatch always run;
     # same-repo PRs run). github.event_name here is the CALLER's event.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubicloud-standard-30
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 300
     env:
       KICAD_LOG_NESTED: "1"
@@ -190,15 +190,15 @@ jobs:
           docker run --rm -v kicad-wasm-ci_kicad-build-cache:/bw -v "$PWD/deps-cache":/cache \
             alpine sh -c 'tar xzf /cache/deps.tar.gz -C /bw'
 
-      # PHASE 1 (base miss only): container compile of all 4 bundles → output/ base
+      # PHASE 1 (base miss only): container compile of the PCB editor → output/ base
       # wasm (opt-independent). 3D viewer per input. --compile-only skips the host
       # asyncify/-O tail. KICAD_PIPELINE has no effect here (no post-process to
       # overlap), but the deps short-circuit on a warm volume.
-      - name: Compile all KiCad tools (container, base wasm)
+      - name: Compile PCB editor (container, base wasm)
         if: steps.final-cache.outputs.cache-hit != 'true' && steps.base-cache.outputs.cache-hit != 'true'
         run: |
           export KICAD_DOCKER_CPUS="$(( $(nproc) - 1 ))" KICAD_DOCKER_MEM=110G
-          echo "Compiling ALL tools (base wasm), 3D viewer=${BUILD_3D_VIEWER}, -j $(nproc)"
+          echo "Compiling PCB editor (base wasm), 3D viewer=${BUILD_3D_VIEWER}, -j $(nproc)"
           ./docker/build.sh all --compile-only --build-deps -j "$(nproc)"
           ls -lh output/*.wasm
 
@@ -243,7 +243,7 @@ jobs:
         if: steps.final-cache.outputs.cache-hit != 'true'
         run: |
           export KICAD_PIPELINE=1 BINARYEN_CORES=16
-          echo "Post-processing ALL tools with ${BINARYEN_OPT_LEVEL}"
+          echo "Post-processing PCB editor with ${BINARYEN_OPT_LEVEL}"
           ./docker/build.sh all --postprocess-only
           echo "wasm-opt used:"; "$(./scripts/binaryen-hoist-pass/build-wasm-opt.sh 2>/dev/null)" --version || true
           ls -lh output/*.wasm
@@ -460,7 +460,7 @@ jobs:
       # exits 0 without --fail-on-change and the step is continue-on-error, so it
       # never blocks the build — flip to gating once the per-engine floors are
       # calibrated (tests/tools/screenshots/config.ts, seeded by
-      # `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
+      # `npm run screenshots:noise`). Posts ONLY on push to atopile/main and no-ops
       # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads
       # the already-produced test-results (screenshots + perf-*.json).
       - name: Screenshot report + perf
@@ -507,7 +507,7 @@ jobs:
         if: always() && inputs.run_tests
         uses: actions/upload-artifact@v4
         with:
-          name: ubicloud-e2e-${{ github.run_id }}
+          name: pcb-editor-e2e-${{ github.run_id }}
           path: |
             tests/logs/**
             tests/test-results/**
