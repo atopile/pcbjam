@@ -1,11 +1,11 @@
 [submodule "kicad"]
 	path = kicad
-	url = https://github.com/PCBJam/kicad-source-mirror.git
-	branch = wasm-port
+	url = https://github.com/atopile/kicad.git
+	branch = codex/pcbjam-upstream-pcb-only-20261006
 [submodule "wxwidgets"]
 	path = wxwidgets
-	url = https://github.com/PCBJam/wxWidgets.git
-	branch = wasm-port
+	url = https://github.com/atopile/wxWidgets.git
+	branch = codex/pcbjam-upstream-host-fixes-20261006
 [submodule "web/pcbjam-shared"]
 	path = web/pcbjam-shared
 	url = https://github.com/PCBJam/pcbjam-shared.git

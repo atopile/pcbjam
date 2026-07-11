@@ -1,8 +1,8 @@
 name: wasm-build (reusable)
 
-# THE single KiCad WASM build+test recipe, called by ci-ubicloud.yml (main/PR) and
+# THE single KiCad WASM build+test recipe, called by ci.yml (atopile/main/PR) and
 # release.yml (tag). Both build the SAME way — the only build knob is the
-# 3D-viewer flag, ON for both real callers — so the build can never diverge from
+# 3D-viewer flag, OFF for both real callers — so the build can never diverge from
 # what ships (the bug that once shipped a 3D-off demo while CI built 3D-on).
 #
 # ONE output cache around docker/build.sh's --compile-only / --postprocess-only
@@ -21,9 +21,9 @@ on:
   workflow_call:
     inputs:
       build_3d_viewer:
-        description: "Build the WASM 3D viewer into kicad_editor (ON/OFF)"
+        description: "Build the WASM 3D viewer (OFF for the web-IDE asset)"
         type: string
-        default: "ON"
+        default: "OFF"
       run_tests:
         description: "Run the wxWidgets + KiCad e2e suites after building"
         type: boolean
@@ -38,7 +38,7 @@ on:
         default: false
     secrets:
       # Declared so this reusable workflow may reference ${{ secrets.DISCORD_WEBHOOK_URL }}
-      # (an undeclared secret reference is a workflow startup failure). ci-ubicloud.yml
+      # (an undeclared secret reference is a workflow startup failure). ci.yml
       # passes it via `secrets: inherit`; release.yml doesn't (required: false) → the
       # screenshot/perf report step just no-ops there.
       DISCORD_WEBHOOK_URL:
@@ -60,11 +60,11 @@ on:
 
 jobs:
   build-and-test:
-    name: Build all tools + KiCad e2e (Ubicloud)
+    name: Build PCB editor + KiCad e2e
     # Don't run untrusted fork PRs on the paid runner (push/dispatch always run;
     # same-repo PRs run). github.event_name here is the CALLER's event.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: ubicloud-standard-30
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 300
     env:
       KICAD_LOG_NESTED: "1"
@@ -165,11 +165,11 @@ jobs:
       # PHASE 1 (cache miss only): container compile of all bundles → output/
       # wasm, fully finalized in-container (JSPI links with the real tools).
       # 3D viewer per input.
-      - name: Compile all KiCad tools (container)
+      - name: Compile PCB editor (container)
         if: steps.wasm-cache.outputs.cache-hit != 'true'
         run: |
           export KICAD_DOCKER_CPUS="$(( $(nproc) - 1 ))" KICAD_DOCKER_MEM=110G
-          echo "Compiling ALL tools, 3D viewer=${BUILD_3D_VIEWER}, -j $(nproc)"
+          echo "Compiling PCB editor, 3D viewer=${BUILD_3D_VIEWER}, -j $(nproc)"
           ./docker/build.sh all --compile-only --build-deps -j "$(nproc)"
           ls -lh output/*.wasm
 
@@ -516,7 +516,7 @@ jobs:
       # exits 0 without --fail-on-change and the step is continue-on-error, so it
       # never blocks the build — flip to gating once the per-engine floors are
       # calibrated (tests/tools/screenshots/config.ts, seeded by
-      # `npm run screenshots:noise`). Posts ONLY on push to main and no-ops
+      # `npm run screenshots:noise`). Posts ONLY on push to atopile/main and no-ops
       # without DISCORD_WEBHOOK_URL (inert on PRs/forks). No extra build — reads
       # the already-produced test-results (screenshots + perf-*.json).
       - name: Screenshot report + perf
@@ -583,7 +583,7 @@ jobs:
         if: always() && inputs.run_tests
         uses: actions/upload-artifact@v4
         with:
-          name: ubicloud-e2e-${{ github.run_id }}
+          name: pcb-editor-e2e-${{ github.run_id }}
           path: |
             tests/logs/**
             tests/test-results/**
