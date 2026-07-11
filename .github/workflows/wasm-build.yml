@@ -68,6 +68,7 @@ jobs:
     timeout-minutes: 300
     env:
       KICAD_LOG_NESTED: "1"
+      PCBJAM_PCB_ONLY: "1"
       BUILD_3D_VIEWER: ${{ inputs.build_3d_viewer }}
       # Stable docker-compose project → deterministic build-cache volume name.
       COMPOSE_PROJECT_NAME: kicad-wasm-ci
@@ -309,7 +310,7 @@ jobs:
       # (e2e/3d-webgl.spec.ts) runs inside the wx e2e step below; it self-skips
       # when this app is missing.
       - name: Build 3D WebGL test app
-        if: inputs.run_tests
+        if: inputs.run_tests && inputs.build_3d_viewer == 'ON'
         run: ./scripts/build-3d-webgl-test.sh
 
       # The emsdk cache saves in the post-job phase; the downloads/ tarballs
@@ -379,12 +380,12 @@ jobs:
       # rotted unnoticed). (The old screenshot-manifest --check gate went with
       # the committed manifest — the manifest now lives in R2, written only by
       # the morelli app, which validates on every promote.)
-      - name: Lint test determinism + CI coverage
+      # The full upstream coverage lint requires unshipped schematic/web suites.
+      - name: Lint test determinism
         if: inputs.run_tests
         working-directory: tests
         run: |
           npm run lint:determinism
-          npm run lint:ci-coverage
           npm run allocator-zero:contract
 
       - name: Install web workspace deps (collab bundle)
@@ -470,16 +471,6 @@ jobs:
         working-directory: tests
         run: xvfb-run -a npm run test:e2e
 
-      # The React web-app suite (web/) against the pnpm dev stack (frontend
-      # :3048 + backend :3060, cold-started by Playwright's webServer on CI).
-      # Runs even if the main e2e failed (`!cancelled()` + not-skipped guard) so
-      # its screenshots still reach the report.
-      - name: web e2e (npm run test:web:ci)
-        id: web_e2e
-        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
-        working-directory: tests
-        run: xvfb-run -a npm run test:web:ci
-
       # Runtime-perf E2E (eeschema + pcbnew): measures the current build's
       # load / open+render / FPS and writes tests/test-results/perf-*.json.
       # Track-only — never gates the build (continue-on-error). CI is
@@ -500,7 +491,7 @@ jobs:
       # baseline-webgl/ and flip this step gating. 3d:review writes the full
       # 47-pair triptych gallery for the artifact upload below.
       - name: 3D renderer parity (report-only)
-        if: inputs.run_tests && !cancelled() && steps.e2e.outcome != 'skipped'
+        if: inputs.run_tests && inputs.build_3d_viewer == 'ON' && !cancelled() && steps.e2e.outcome != 'skipped'
         continue-on-error: true
         working-directory: tests
         run: |
@@ -532,8 +523,7 @@ jobs:
         # without --fail-on-change; continue-on-error also shields transient Discord hiccups.
         run: |
           E2E=pass
-          { [ "${{ steps.e2e.outcome }}" = "success" ] \
-            && [ "${{ steps.web_e2e.outcome }}" = "success" ]; } || E2E=fail
+          [ "${{ steps.e2e.outcome }}" = "success" ] || E2E=fail
           npm run screenshots:check
           npm run screenshots:report -- --e2e "$E2E"
 
@@ -554,8 +544,7 @@ jobs:
           CI_SCREENSHOTS_S3_SECRET_ACCESS_KEY: ${{ secrets.CI_SCREENSHOTS_S3_WRITE_SECRET_ACCESS_KEY }}
         run: |
           E2E=pass
-          { [ "${{ steps.e2e.outcome }}" = "success" ] \
-            && [ "${{ steps.web_e2e.outcome }}" = "success" ]; } || E2E=fail
+          [ "${{ steps.e2e.outcome }}" = "success" ] || E2E=fail
           npm run screenshots:upload-run -- --e2e "$E2E"
 
       # FALLBACK on failure: a minimal text-only "CI failed" notice, only when the

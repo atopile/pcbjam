@@ -75,6 +75,26 @@ const appsDir = 'apps';
 // CPU throttling (Chromium-only). Excluded from the kicad projects so they
 // don't double-run there.
 const PERF_SPECS = ['**/*-perf.spec.ts'];
+const PCB_ONLY = process.env.PCBJAM_PCB_ONLY === '1';
+// Only the PCB editor is packaged by this fork. Both JSPI-capable browser
+// projects exercise the same product contract; the full upstream suite remains
+// available without PCBJAM_PCB_ONLY.
+const PCB_ONLY_SPECS = [
+  '**/presence-locks-pcbnew.spec.ts',
+  '**/presence-pcbnew.spec.ts',
+  '**/appearance.spec.ts',
+  '**/contextmenu-scrollbar-pcbnew.spec.ts',
+  '**/dark-mode.spec.ts',
+  '**/items-bridge.spec.ts',
+  '**/pcbnew-collab.spec.ts',
+  '**/pcbnew-move.spec.ts',
+  '**/pcbnew.spec.ts',
+  '**/roundtrip.spec.ts',
+  '**/save-hook.spec.ts',
+  '**/ysync-repros-pcbnew.spec.ts',
+  '**/ysync-two-tab.spec.ts',
+  '**/zone-net-selector.spec.ts',
+];
 
 // Bundled Chromium on GPU-less CI: use ANGLE over desktop GL (Mesa llvmpipe
 // via the Xvfb display CI already provides — the whole e2e step runs under
@@ -145,7 +165,7 @@ export default defineConfig({
   retries: 0,
   // Parallel workers on CI too (Playwright default ≈ 50% of cores) — the
   // serial CI run was the dominant wall-clock cost.
-  workers: undefined,
+  workers: process.env.CI ? 8 : undefined,
   reporter: 'html',
   timeout: 60000, // wx-suite default; the heavier projects override below
 
@@ -176,6 +196,7 @@ export default defineConfig({
     {
       name: 'kicad-firefox',
       testDir: './kicad',
+      testMatch: PCB_ONLY ? PCB_ONLY_SPECS : undefined,
       testIgnore: PERF_SPECS,
       timeout: 180000, // KiCad WASM needs more time to load
       use: {
@@ -187,6 +208,7 @@ export default defineConfig({
     {
       name: 'kicad-chromium',
       testDir: './kicad',
+      testMatch: PCB_ONLY ? PCB_ONLY_SPECS : undefined,
       testIgnore: PERF_SPECS,
       timeout: 180000,
       use: {
@@ -252,6 +274,7 @@ export default defineConfig({
       //   npx playwright test --project=kicad-chrome --headed kicad/pcbnew.spec.ts
       name: 'kicad-chrome',
       testDir: './kicad',
+      testMatch: PCB_ONLY ? PCB_ONLY_SPECS : undefined,
       testIgnore: PERF_SPECS,
       timeout: 180000,
       use: {
