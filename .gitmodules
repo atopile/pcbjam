@@ -5,7 +5,7 @@
 [submodule "wxwidgets"]
 	path = wxwidgets
 	url = https://github.com/atopile/wxWidgets.git
-	branch = atopile/main
+	branch = codex/wasm-v3.2.11
 [submodule "web/pcbjam-shared"]
 	path = web/pcbjam-shared
 	url = https://github.com/emergence-engineering/pcbjam-shared.git
