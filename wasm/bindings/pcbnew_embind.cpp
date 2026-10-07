@@ -1891,6 +1891,11 @@ void doApplyItems( PCB_EDIT_FRAME* aFrame, const json& aPayload )
     rebaselineTouched( board, touched );
     s_applyingRemote = false;
     scheduleFlush();
+
+    // Remote edits have no input event to repaint the GAL canvas. Present the
+    // committed view immediately, including while another editor has focus.
+    if( staged )
+        aFrame->GetCanvas()->ForceRefresh();
 }
 
 // Test/PoC move (the BOARD_COMMIT body for kicadCollabTestMoveFirst). Run inside a COROUTINE by
