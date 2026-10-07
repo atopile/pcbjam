@@ -1310,6 +1310,7 @@ void detachBridge()
         g_listenedBoard->RemoveListener( g_listener );
 
     g_listenedBoard = nullptr;
+    g_headerCheck = false;
     g_flushScheduled = false;
     g_dirty.clear();
 }
@@ -1498,6 +1499,9 @@ void pcbCollabApplyHeader( std::string aText )
 // loaded document as a local edit.
 bool pcbSyncEnable()
 {
+    if( pcbjam_open::busy() )
+        return false;
+
     if( !ensureBridge() )
         return false;
 
@@ -1514,6 +1518,9 @@ bool pcbSyncEnable()
 // from echoing back as a local modification.
 bool pcbSyncOpenFile( std::string aPath )
 {
+    if( pcbjam_open::busy() )
+        return false;
+
     // OpenProjectFiles frames the newly loaded board.  That is desirable for
     // the first document, but disruptive for an authoritative live-sync
     // replacement: every atopile edit would throw away the user's pan/zoom.
@@ -1575,6 +1582,9 @@ bool pcbSyncOpenFile( std::string aPath )
 
 std::string pcbSyncSnapshot()
 {
+    if( pcbjam_open::busy() )
+        return {};
+
     PCB_EDIT_FRAME* frame = pcbFrame();
     return frame ? serializeBoard( frame->GetBoard() ) : std::string();
 }

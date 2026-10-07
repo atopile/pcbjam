@@ -18,8 +18,9 @@ import { waitForEditorReady, shotPath, stableShot } from '../e2e/utils/element-t
  */
 
 test.describe('PCBnew dark-mode browser', () => {
-    test('toolbar icons render the light theme under a dark-mode browser', async ({ browser, browserName }) => {
+    test('toolbar icons render the light theme under a dark-mode browser', async ({ browser, baseURL }) => {
         const lightContext = await browser.newContext({
+            baseURL,
             colorScheme: 'light',
             viewport: { width: 1280, height: 720 },
         });
@@ -27,10 +28,12 @@ test.describe('PCBnew dark-mode browser', () => {
         await lightPage.goto('/kicad/pcbnew.html');
         await waitForEditorReady(lightPage);
         await hideCursor(lightPage);
-        await stableShot(lightPage, shotPath(browserName, 'pcbnew-light-mode-current.png'), { scale: 'css' });
+        const lightReference = shotPath(lightPage, 'pcbnew-light-mode-current.png');
+        await stableShot(lightPage, lightReference);
         await lightContext.close();
 
         const darkContext = await browser.newContext({
+            baseURL,
             colorScheme: 'dark',
             viewport: { width: 1280, height: 720 },
         });
@@ -53,7 +56,7 @@ test.describe('PCBnew dark-mode browser', () => {
         const reference = await compareToReference(
             page,
             cssScreenshot,
-            shotPath(browserName, 'pcbnew-light-mode-current.png'),
+            lightReference,
             PCBNEW_HEADER_REGION,
         );
 
