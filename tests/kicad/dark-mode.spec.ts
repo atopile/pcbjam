@@ -18,7 +18,7 @@ import { waitForEditorReady, shotPath, stableShot } from '../e2e/utils/element-t
  */
 
 test.describe('PCBnew dark-mode browser', () => {
-    test('toolbar icons render the light theme under a dark-mode browser', async ({ browser, baseURL }) => {
+    test('toolbar icons render the light theme under a dark-mode browser', async ({ browser, baseURL, launchOptions, headless }) => {
         const lightContext = await browser.newContext({
             baseURL,
             colorScheme: 'light',
@@ -32,38 +32,52 @@ test.describe('PCBnew dark-mode browser', () => {
         await stableShot(lightPage, lightReference);
         await lightContext.close();
 
-        const darkContext = await browser.newContext({
-            baseURL,
-            colorScheme: 'dark',
-            viewport: { width: 1280, height: 720 },
+        // Firefox loses context-level colour emulation on COOP/COEP pages.
+        // Use a separate browser with the dark preference, retaining the CI
+        // WebGL/JSPI launch options and the genuinely light reference above.
+        const darkBrowser = await browser.browserType().launch({
+            ...launchOptions,
+            headless,
+            firefoxUserPrefs: {
+                ...launchOptions.firefoxUserPrefs,
+                'ui.systemUsesDarkTheme': 1,
+            },
         });
-        const page = await darkContext.newPage();
-        await page.goto('/kicad/pcbnew.html');
+        try {
+            const darkContext = await darkBrowser.newContext({
+                baseURL,
+                colorScheme: 'dark',
+                viewport: { width: 1280, height: 720 },
+            });
+            const page = await darkContext.newPage();
+            await page.goto('/kicad/pcbnew.html');
 
-        // Sanity-check the browser really reports dark mode to the app.
-        expect(await page.evaluate(() =>
-            window.matchMedia('(prefers-color-scheme: dark)').matches
-        )).toBe(true);
+            // Sanity-check the browser really reports dark mode to the app.
+            expect(await page.evaluate(() =>
+                window.matchMedia('(prefers-color-scheme: dark)').matches
+            )).toBe(true);
 
-        await waitForEditorReady(page);
-        await hideCursor(page);
+            await waitForEditorReady(page);
+            await hideCursor(page);
 
-        const cssScreenshot = await page.screenshot({
-            path: shotPath(page, 'pcbnew-dark-mode-loaded.png'),
-            scale: 'css'
-        });
+            const cssScreenshot = await page.screenshot({
+                path: shotPath(page, 'pcbnew-dark-mode-loaded.png'),
+                scale: 'css'
+            });
 
-        const reference = await compareToReference(
-            page,
-            cssScreenshot,
-            lightReference,
-            PCBNEW_HEADER_REGION,
-        );
+            const reference = await compareToReference(
+                page,
+                cssScreenshot,
+                lightReference,
+                PCBNEW_HEADER_REGION,
+            );
 
-        expect(reference.actualWidth).toBe(reference.referenceWidth);
-        expect(reference.actualHeight).toBe(reference.referenceHeight);
-        expect(reference.diffRatio, 'header diff ratio vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxDiffRatio);
-        expect(reference.meanChannelDiff, 'header mean channel diff vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxMeanChannelDiff);
-        await darkContext.close();
+            expect(reference.actualWidth).toBe(reference.referenceWidth);
+            expect(reference.actualHeight).toBe(reference.referenceHeight);
+            expect(reference.diffRatio, 'header diff ratio vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxDiffRatio);
+            expect(reference.meanChannelDiff, 'header mean channel diff vs light-mode reference').toBeLessThan(PCBNEW_HEADER_REGION.maxMeanChannelDiff);
+        } finally {
+            await darkBrowser.close();
+        }
     });
 });
