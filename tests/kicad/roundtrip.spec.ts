@@ -510,6 +510,7 @@ test.describe("round trip: file → yjs → file", () => {
     context,
     testLogger,
   }) => {
+    test.skip(PCB_ONLY, "PCB-only product build");
     await expectWireMatchesFile(context, SCH_SYM);
     expect(hasAbort(testLogger), "no WASM abort").toBe(false);
   });
