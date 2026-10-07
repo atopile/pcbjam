@@ -160,7 +160,7 @@ async function bootAndOpen(page: Page, name: string): Promise<void> {
       }
       const p = `${dir}/${name}.kicad_pcb`;
       w.FS.writeFile(p, content);
-      w.Module.kicadOpenFile(p);
+      return w.Module.kicadOpenFile(p);
     },
     { content: SAMPLE_PCB, name },
   );

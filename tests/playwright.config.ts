@@ -93,7 +93,6 @@ const PCB_ONLY_SPECS = [
   '**/save-hook.spec.ts',
   '**/ysync-repros-pcbnew.spec.ts',
   '**/ysync-two-tab.spec.ts',
-  '**/zone-net-selector.spec.ts',
 ];
 
 // Bundled Chromium on GPU-less CI: use ANGLE over desktop GL (Mesa llvmpipe

@@ -373,14 +373,9 @@ jobs:
           CI_SCREENSHOTS_S3_SECRET_ACCESS_KEY: ${{ secrets.CI_SCREENSHOTS_S3_SECRET_ACCESS_KEY }}
         run: npm run screenshots:fetch
 
-      # Cheap hygiene gates (no build needed): the determinism lint keeps the
-      # banned flake patterns out of the specs, and the CI-coverage lint proves
-      # every spec file on disk is reachable from the npm scripts THIS workflow
-      # invokes (a spec/project that CI never runs is how the web suite once
-      # rotted unnoticed). (The old screenshot-manifest --check gate went with
-      # the committed manifest — the manifest now lives in R2, written only by
-      # the morelli app, which validates on every promote.)
-      # The full upstream coverage lint requires unshipped schematic/web suites.
+      # Keep deterministic specs and the allocator contract. The upstream
+      # coverage lint requires all application suites, including the schematic
+      # and web shells that this PCB-only artifact does not ship.
       - name: Lint test determinism
         if: inputs.run_tests
         working-directory: tests

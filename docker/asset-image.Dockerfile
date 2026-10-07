@@ -18,7 +18,8 @@ RUN set -eu; \
         test -s "$file" || { echo "missing or empty asset: $file" >&2; exit 1; }; \
     done; \
     wasm_bytes="$(stat -c %s kicad_editor.wasm)"; \
-    test "$wasm_bytes" -ge 52428800 || { \
+    # The JSPI PCB-only build is about 44 MiB (the old Asyncify floor was 50 MiB).
+    test "$wasm_bytes" -ge 33554432 || { \
         echo "kicad_editor.wasm is unexpectedly small: $wasm_bytes bytes" >&2; \
         exit 1; \
     }; \

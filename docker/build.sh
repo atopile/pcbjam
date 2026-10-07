@@ -12,7 +12,7 @@
 #   pl_editor      drawing-sheet editor
 #   gerbview       Gerber viewer
 #   all            build the deployed product (pcbnew only)
-#   pcbnew         standalone PCB engine (debug aid; not deployed — kicad_editor is)
+#   pcbnew         standalone PCB engine shipped to the web IDE
 #   eeschema       standalone schematic engine (debug aid; not deployed)
 #
 # A comma-separated list builds just those apps in order (e.g.
