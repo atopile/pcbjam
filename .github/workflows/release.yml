@@ -65,6 +65,16 @@ jobs:
           name: wasm-output
           path: output
 
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+
+      - name: Generate release assets and manifest
+        env:
+          RELEASE_VERSION: ${{ needs.meta.outputs.tag }}
+          RELEASE_REVISION: ${{ github.sha }}
+        run: |
+          node scripts/deploy/release-manifest.mjs output release-assets "$RELEASE_VERSION" "$RELEASE_REVISION"
+
       - name: Log in to GHCR
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
@@ -97,7 +107,7 @@ jobs:
           context: .
           file: docker/asset-image.Dockerfile
           build-contexts: |
-            wasm-output=./output
+            wasm-output=./release-assets
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

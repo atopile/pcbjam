@@ -230,6 +230,8 @@ compile_app() {
 
     local out_dir="output"
     local kicad_build="kicad-${app}"
+    local kicad_revision
+    kicad_revision=$(git -C kicad rev-parse HEAD)
 
     # Run build inside the container.
     # -e EMSDK=/emsdk: `docker compose exec` bypasses the entrypoint that sources
@@ -256,12 +258,26 @@ compile_app() {
             cp /workspace/wxwidgets/build/wasm/wx.js /workspace/${out_dir}/ 2>/dev/null || true; \
             cp /workspace/wxwidgets/build/wasm/wx-dom.js /workspace/${out_dir}/ 2>/dev/null || true"
 
+    # Keep the version header from the SAME build as the PCB editor. It travels
+    # with the cached/tested artifact, so release packaging needs no KiCad checkout.
+    if [ "$app" = "pcbnew" ]; then
+        docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
+            cp /workspace/build-wasm/${kicad_build}/kicad_build_version.h \
+            /workspace/${out_dir}/kicad_build_version.h
+    fi
+
     # The container runs as root, so files in the bind-mounted ./output land
     # root-owned on the host. macOS Docker Desktop remaps ownership to the host
     # user, but on a Linux CI runner the host-side ENV-shim step can't write
     # into ./output. Hand ownership back.
     docker compose -f docker/docker-compose.yml exec kicad-wasm-builder \
         chown -R "$(id -u):$(id -g)" /workspace/output || true
+    if [ "$app" = "pcbnew" ]; then
+        # Source synchronization excludes .git. KiCad's generated header can
+        # therefore have a zero commit hash; retain the synced source's Git SHA
+        # alongside that header instead of guessing it at publish time.
+        printf '%s\n' "$kicad_revision" > "$out_dir/kicad_source_revision.txt"
+    fi
 }
 
 # Phase 2 of one app: host-side post-processing (ENV merge shim). Pure host
