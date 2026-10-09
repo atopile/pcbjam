@@ -88,6 +88,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 
+      - name: Test release manifest packaging
+        run: node --test scripts/deploy/release-manifest.test.mjs
+
       # --- cache key ---------------------------------------------------------
       # ONE key, from the compile inputs only: kicad/wx submodule SHAs, the sc
       # source-content hash (wasm-cache-hash.mjs — build logic outside the
@@ -137,6 +140,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             build-wasm/sysroot/include
             !output/*.wasm.debug.wasm
           key: ${{ steps.keys.outputs.key }}
@@ -212,6 +217,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             build-wasm/sysroot/include
             !output/*.wasm.debug.wasm
           key: ${{ steps.keys.outputs.key }}
@@ -229,6 +236,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             !output/*.wasm.debug.wasm
 
       # --- e2e tests (gated on run_tests) ------------------------------------
