@@ -6,15 +6,17 @@ FROM docker.io/library/debian:bookworm-slim@sha256:60eac759739651111db372c07be67
 
 WORKDIR /pcbjam-assets
 
-COPY --from=wasm-output /pcbnew.wasm ./kicad_editor.wasm
-COPY --from=wasm-output /pcbnew.js ./kicad_editor.js
+# release.yml creates this directory from the tested artifact, normalizing
+# filenames before hashing. Copy the manifest and its exact files together.
+COPY --from=wasm-output /kicad_editor.wasm ./kicad_editor.wasm
+COPY --from=wasm-output /kicad_editor.js ./kicad_editor.js
 COPY --from=wasm-output /wx.js ./wx.js
 COPY --from=wasm-output /wx-dom.js ./wx-dom.js
 COPY --from=wasm-output /images.tar.gz ./images.tar.gz
+COPY --from=wasm-output /release.json ./release.json
 
 RUN set -eu; \
-    sed -i 's/pcbnew\.wasm/kicad_editor.wasm/g' kicad_editor.js; \
-    for file in kicad_editor.wasm kicad_editor.js wx.js wx-dom.js images.tar.gz; do \
+    for file in release.json kicad_editor.wasm kicad_editor.js wx.js wx-dom.js images.tar.gz; do \
         test -s "$file" || { echo "missing or empty asset: $file" >&2; exit 1; }; \
     done; \
     wasm_bytes="$(stat -c %s kicad_editor.wasm)"; \
