@@ -23,7 +23,3 @@ named build context. The manifest contains:
 Required metadata and assets must exist and agree; packaging fails otherwise.
 The release version comes from the workflow's release tag, not a second constant.
 Do not rename or modify packaged files without regenerating the manifest.
-
-Run the packaging tests with
-`node --test scripts/deploy/release-manifest.test.mjs`. The reusable build workflow
-also runs them before compiling.
