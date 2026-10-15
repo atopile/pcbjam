@@ -137,6 +137,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             build-wasm/sysroot/include
             !output/*.wasm.debug.wasm
           key: ${{ steps.keys.outputs.key }}
@@ -212,6 +214,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             build-wasm/sysroot/include
             !output/*.wasm.debug.wasm
           key: ${{ steps.keys.outputs.key }}
@@ -229,6 +233,8 @@ jobs:
             output/*.wasm.map
             output/*.worker.js
             output/images.tar.gz
+            output/kicad_build_version.h
+            output/kicad_source_revision.txt
             !output/*.wasm.debug.wasm
 
       # --- e2e tests (gated on run_tests) ------------------------------------
