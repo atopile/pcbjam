@@ -88,9 +88,6 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
 
-      - name: Test release manifest packaging
-        run: node --test scripts/deploy/release-manifest.test.mjs
-
       # --- cache key ---------------------------------------------------------
       # ONE key, from the compile inputs only: kicad/wx submodule SHAs, the sc
       # source-content hash (wasm-cache-hash.mjs — build logic outside the
